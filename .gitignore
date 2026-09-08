@@ -57,6 +57,8 @@ config/.email_key
 config/email_credentials.json
 config/ig_session.json
 
+config/ig_session.json
+
 # Installer and Build Scripts
 installer/
 install_wizard.py
@@ -66,3 +68,4 @@ search_results.txt
 homescreen background/node_modules/
 homescreen background/.next/
 homescreen background/out/
+brahma_native_engine/

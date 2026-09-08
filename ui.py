@@ -10711,6 +10711,21 @@ class _RootShim:
 
 
 class BrahmaUI:
+
+    def open_study_monitor(self):
+        try:
+            popup = StudyMonitorPopup(self._win)
+            
+            w_rect = self._win.geometry()
+            p_rect = popup.geometry()
+            x = (w_rect.width() - p_rect.width()) // 2
+            y = (w_rect.height() - p_rect.height()) // 2
+            popup.move(x, y)
+            
+            popup.show()
+            popup.raise_()
+        except Exception as e:
+            print(f"Error opening study monitor: {e}")
     def __init__(self, face_path: str, size=None, *, show_immediately: bool = True):
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
@@ -12203,6 +12218,21 @@ class _RootShim:
 
 
 class BrahmaUI:
+
+    def open_study_monitor(self):
+        try:
+            popup = StudyMonitorPopup(self._win)
+            
+            w_rect = self._win.geometry()
+            p_rect = popup.geometry()
+            x = (w_rect.width() - p_rect.width()) // 2
+            y = (w_rect.height() - p_rect.height()) // 2
+            popup.move(x, y)
+            
+            popup.show()
+            popup.raise_()
+        except Exception as e:
+            print(f"Error opening study monitor: {e}")
     def __init__(self, face_path: str, size=None, *, show_immediately: bool = True):
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
@@ -12929,4 +12959,59 @@ class BrahmaUI:
 
 
 
+
+
+
+class StudyMonitorPopup(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(640, 520)
+        self.setStyleSheet("background: rgba(15, 15, 20, 0.95); border: 1px solid #ffaa30; border-radius: 12px;")
+        
+        lay = QVBoxLayout(self)
+        
+        header = QHBoxLayout()
+        title = QLabel("SMART STUDY MONITOR")
+        title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        title.setStyleSheet("color: #ffaa30; border: none; background: transparent;")
+        header.addWidget(title)
+        header.addStretch()
+        
+        close_btn = QPushButton("X")
+        close_btn.setFixedSize(30, 30)
+        close_btn.setStyleSheet("QPushButton { color: #fff; background: transparent; border: none; font-size: 16px; font-weight: bold; } QPushButton:hover { color: #ff3b30; }")
+        close_btn.clicked.connect(self.close_monitor)
+        header.addWidget(close_btn)
+        
+        lay.addLayout(header)
+        
+        self.status_lbl = QLabel("Initializing Camera...")
+        self.status_lbl.setStyleSheet("color: rgba(255,255,255,0.7); border: none; background: transparent;")
+        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self.status_lbl)
+        
+        self.video_lbl = QLabel()
+        self.video_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_lbl.setStyleSheet("background: #000; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;")
+        lay.addWidget(self.video_lbl, 1)
+        
+        try:
+            from actions.study_monitor import StudyMonitorThread
+            self.thread = StudyMonitorThread()
+            self.thread.frame_ready.connect(self.update_frame)
+            self.thread.status_updated.connect(self.status_lbl.setText)
+            self.thread.start()
+        except Exception as e:
+            self.status_lbl.setText(f"Failed to load study monitor: {e}")
+            self.thread = None
+
+    def update_frame(self, qimg):
+        from PyQt6.QtGui import QPixmap
+        self.video_lbl.setPixmap(QPixmap.fromImage(qimg).scaled(self.video_lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+    def close_monitor(self):
+        if hasattr(self, 'thread') and self.thread:
+            self.thread.stop()
+        self.hide()
+        self.deleteLater()
 

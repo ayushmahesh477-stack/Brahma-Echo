@@ -357,6 +357,8 @@ def _looks_like_website_request(text: str) -> bool:
     website_words = (
         "website",
         "web site",
+        "webpage",
+        "web page",
         "landing page",
         "homepage",
         "home page",
@@ -367,8 +369,14 @@ def _looks_like_website_request(text: str) -> bool:
         "web app",
         "frontend",
         "site",
+        "html",
+        "react",
+        "web",
     )
-    return any(word in low for word in website_words)
+    action_words = ("make", "create", "build", "design", "develop", "generate", "code", "edit", "update", "fix")
+    has_web = any(re.search(rf"\b{re.escape(w)}\b", low) for w in website_words)
+    has_action = any(re.search(rf"\b{re.escape(a)}\b", low) for a in action_words)
+    return has_web and (has_action or any(w in low for w in ("landing page", "homepage", "portfolio", "website", "web app", "web page")))
 
 
 def _is_gemini_limit_error(exc: Exception) -> bool:
@@ -1596,6 +1604,20 @@ class BrahmaLive:
 
         # Check for email command initiation
         lower = text.lower()
+
+        if "study mode" in lower or "study monitor" in lower:
+            try:
+                self.ui.open_study_monitor()
+                try:
+                    from core.speech import speak_native_text
+                    speak_native_text("Starting Study Mode. Stay focused!")
+                except Exception:
+                    pass
+                if self.ui:
+                    self.ui.update_status("Starting Study Monitor...")
+            except Exception as e:
+                print(f"Error starting study mode: {e}")
+            return
         if lower.startswith("email ") or lower.startswith("mail ") or "send email" in lower or "write email" in lower or "compose email" in lower:
             # Extract recipient
             rem = text
@@ -1666,37 +1688,61 @@ class BrahmaLive:
             print(f"[BRAHMA ECHO] Redirection error: {e}")
 
         developer_settings = self.ui._load_app_settings() if hasattr(self.ui, "_load_app_settings") else {}
-        developer_enabled = bool(developer_settings.get("developer_mode_enabled", False))
         developer_workspace = str(developer_settings.get("developer_mode_workspace", "")).strip()
-        website_request = _looks_like_website_request(text)
-        if website_request and not (developer_enabled and developer_workspace):
-            message = "Website builds need developer mode enabled and a workspace folder selected first."
-            self.ui.write_log(f"ERR: {message}")
-            self.speak(message)
-            return
+        if not developer_workspace:
+            developer_workspace = str(Path.home() / "Desktop" / "BrahmaProjects")
+            Path(developer_workspace).mkdir(parents=True, exist_ok=True)
 
-        if website_request and developer_enabled and developer_workspace:
-            try:
-                self.speak("Working on your website...")
-                if hasattr(self.ui, "_developer_status_lbl"):
-                    self.ui._developer_status_lbl.setText("Building website with Gemini in the selected workspace")
-                    self.ui._developer_card.show()
-                    self.ui._developer_card.raise_()
-                result = website_builder(
-                    parameters={
-                        "action": "create",
+        website_request = _looks_like_website_request(text)
+        code_request = _looks_like_code_request(text) and any(w in text.lower() for w in ("app", "website", "web", "program", "script", "project", "game", "calc", "html", "react"))
+
+        if website_request or code_request:
+            self.speak("Working on your project with Brahma Dev...")
+            if hasattr(self.ui, "begin_task_workspace"):
+                self.ui.begin_task_workspace(text, ["Analyzing specifications", "Scaffolding files", "Writing code", "Verifying build"], source=source or "local")
+
+            def _run_brahma_dev():
+                try:
+                    import webbrowser
+                    from actions.brahma_dev_agent import run_dev_agent
+                    res = run_dev_agent({
                         "description": text,
-                        "title": text,
-                        "output_dir": developer_workspace,
-                        "auto_open": True,
-                    },
-                    player=self.ui,
-                )
-                self.ui.write_log(f"[WebsiteBuilder] {result[:400]}")
-                self.speak(result[:800])
-                return
-            except Exception as exc:
-                self.ui.write_log(f"ERR: Website build failed: {exc}")
+                        "workspace_path": developer_workspace
+                    }, speak=self.speak)
+                    self.ui.write_log(f"[BrahmaDev] {res[:400]}")
+
+                    if "encountered an error during inference" in res or "LLM error:" in res:
+                        if hasattr(self.ui, "update_task_workspace"):
+                            self.ui.update_task_workspace(status="Build Error", output=res, percent=0)
+                        self.speak("There was an error building the project, sir. Please check the logs.")
+                        return
+
+                    if hasattr(self.ui, "update_task_workspace"):
+                        self.ui.update_task_workspace(status="Project Completed", output=res, percent=100)
+
+                    folder_display = developer_workspace
+                    try:
+                        folder_display = Path(developer_workspace).name or developer_workspace
+                    except Exception:
+                        pass
+
+                    self.speak(f"Your project has been completed and saved to {folder_display}, sir.")
+
+                    # Auto-open index.html in browser if created
+                    try:
+                        idx_path = Path(developer_workspace) / "index.html"
+                        if idx_path.exists():
+                            webbrowser.open(str(idx_path.resolve()))
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    self.ui.write_log(f"ERR: Brahma Dev failed: {exc}")
+                    if hasattr(self.ui, "update_task_workspace"):
+                        self.ui.update_task_workspace(status="Build Failed", output=str(exc), percent=0)
+                    self.speak("There was an issue building the project, sir. Please check the logs.")
+
+            threading.Thread(target=_run_brahma_dev, daemon=True).start()
+            return
 
         memory_ctx = _memory_context_for_request(text)
         routed_text = f"{memory_ctx}\n\nCurrent User Request:\n{text}" if memory_ctx else text
@@ -2260,6 +2306,20 @@ class BrahmaLive:
             return data.get("intent", "IGNORE"), data.get("reply_text", "")
         except Exception:
             lower = text.lower()
+
+        if "study mode" in lower or "study monitor" in lower:
+            try:
+                self.ui.open_study_monitor()
+                try:
+                    from core.speech import speak_native_text
+                    speak_native_text("Starting Study Mode. Stay focused!")
+                except Exception:
+                    pass
+                if self.ui:
+                    self.ui.update_status("Starting Study Monitor...")
+            except Exception as e:
+                print(f"Error starting study mode: {e}")
+            return
             if any(c in lower for c in ("cancel", "stop", "skip", "never mind", "abort")):
                 return "CANCEL", ""
             if any(a in lower for a in ("take over", "auto mode", "handle it", "you reply")):
@@ -2314,6 +2374,20 @@ class BrahmaLive:
         return False
 
         lower = text.lower()
+
+        if "study mode" in lower or "study monitor" in lower:
+            try:
+                self.ui.open_study_monitor()
+                try:
+                    from core.speech import speak_native_text
+                    speak_native_text("Starting Study Mode. Stay focused!")
+                except Exception:
+                    pass
+                if self.ui:
+                    self.ui.update_status("Starting Study Monitor...")
+            except Exception as e:
+                print(f"Error starting study mode: {e}")
+            return
         if any(cancel in lower for cancel in ("cancel", "never mind", "skip", "stop", "abort")):
             self._email_mode = False
             self._email_step = 0
