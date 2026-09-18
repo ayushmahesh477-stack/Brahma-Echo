@@ -148,7 +148,19 @@ def web_search(
     try:
         results = _ddg_search(query)
         if results:
+            if player and hasattr(player, "show_hud_operation"):
+                try:
+                    sources = [r.get("url") or r.get("title") for r in results[:4] if r.get("url") or r.get("title")]
+                    player.show_hud_operation("WEB INTELLIGENCE", f"Retrieved {len(results)} sources for '{query[:30]}'", sources=sources, tool="SEARCH")
+                except Exception:
+                    pass
             result = _format_ddg(query, results)
+            if player and hasattr(player, "show_hud_deliverable"):
+                try:
+                    bullets = [r.get("title") for r in results[:4] if r.get("title")]
+                    player.show_hud_deliverable(f"SEARCH: {query[:25].upper()}", bullets=bullets, kind="search")
+                except Exception:
+                    pass
             print(f"[WebSearch] DDG OK: {len(results)} result(s).")
             return result
         print("[WebSearch] DDG returned no results, trying Gemini...")

@@ -248,5 +248,5 @@ def calendar_scheduler(
 
 
 def run(parameters: dict, player=None, session_memory=None) -> str:
-    """Plugin wrapper for Mark-LI architecture."""
+    """Plugin wrapper for Brahma architecture."""
     return calendar_scheduler(parameters, player=player, session_memory=session_memory)

@@ -44,7 +44,7 @@ SYSTEM_PROMPT = (
     "You are Brahma AI - Lite, an open-source assistant. "
     "Analyze images with technical precision and intelligence. "
     "Help the user in a way they can understand — don't be overly complex. "
-    "Be concise, smart, and helpful like Tony Stark's AI assistant. "
+    "Be concise, smart, and helpful like Brahma AI, personal assistant to Suryaansh. "
     "Respond in maximum 2 short sentences. Speed is priority. "
     "Address the user as 'sir' for a tone of respect. "
     "Ask if the user needs any further help with their problem."
@@ -405,6 +405,13 @@ def screen_process(
             image_bytes = _capture_camera()
             mime_type   = "image/jpeg"
             print("[ScreenProcess] [CAMERA] Camera captured")
+        elif angle in ("active_window", "window") or (parameters or {}).get("target") == "active_window":
+            from core.window_context import capture_active_window_screenshot
+            image_bytes = capture_active_window_screenshot()
+            if not image_bytes:
+                image_bytes = _capture_screenshot()
+            mime_type = "image/jpeg"
+            print("[ScreenProcess] [WINDOW] Active window captured")
         else:
             if image_bytes:
                 mime_type = "image/jpeg"
@@ -426,14 +433,21 @@ def screen_process(
         print("[ScreenProcess] [ERR] Vision module is not ready to send image.")
         return _screen_failure("Vision module is offline. It may still be reconnecting.")
 
-    # Prevent getting stuck if screen capture fails and returns None
-    if not image_bytes:
-        print("[ScreenProcess] [ERR] Failed to capture image bytes.")
-        if player and hasattr(player, "set_scanning") and angle != "camera":
-            player.set_scanning(False, "")
-            if hasattr(player, "write_log"):
-                player.write_log("System Event: Failed to capture screen (Windows graphics function failed). Please check your display settings.")
-        return False
+    # Enrich prompt with foreground window context if available
+    if angle != "camera":
+        try:
+            from core.window_context import get_foreground_window_info
+            w_info = get_foreground_window_info()
+            if w_info and w_info.get("title"):
+                w_title = w_info.get("title", "").strip()
+                w_class = w_info.get("class_name", "").strip()
+                if w_title and "brahma" not in w_title.lower():
+                    context_tag = f"\n[User's Active Focused Application: \"{w_title}\" (Class: {w_class})]"
+                    if context_tag not in user_text:
+                        user_text += context_tag
+                        print(f"[ScreenProcess] Injected window context: {w_title}")
+        except Exception as we:
+            print(f"[ScreenProcess] [WARN] Could not get foreground window context: {we}")
 
     print(f"[ScreenProcess] [PKG] {len(image_bytes)} bytes → sending")
     _live.analyze(image_bytes, mime_type, user_text)

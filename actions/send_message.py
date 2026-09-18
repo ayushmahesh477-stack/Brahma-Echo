@@ -90,35 +90,23 @@ def _open_instagram_post_dialog() -> None:
 
 def _send_instagram(receiver: str, message: str) -> str:
     """
-    Sends an Instagram DM via browser (instagram.com).
+    Sends an Instagram DM via API and opens the thread in the browser.
     """
     try:
-        _open_instagram_home()
-        pyautogui.write(receiver, interval=0.05)
-        time.sleep(1.5)
-
-        pyautogui.press("down")
-        time.sleep(0.3)
-        pyautogui.press("enter")
-        time.sleep(0.5)
-
-        for _ in range(3):
-            pyautogui.press("tab")
-            time.sleep(0.1)
-        pyautogui.press("enter")
-        time.sleep(1.5)
-
-        pyautogui.write(message, interval=0.04)
-        time.sleep(0.2)
-        pyautogui.press("enter")
-        return f"Message sent to {receiver} via Instagram."
+        from actions.instagram_mcp import InstagramService
+        res = InstagramService.instance().send_dm(receiver, message, open_in_browser=True)
+        return f"Message sent to @{receiver} via Instagram. Thread opened in browser."
     except Exception as e:
-        return f"Instagram error: {e}"
+        try:
+            _open_instagram_home()
+            return f"Opened Instagram in browser: {e}"
+        except Exception:
+            return f"Instagram error: {e}"
 
 
 def _upload_instagram_media(media_path: str, caption: str = "", mode: str = "post") -> str:
     """
-    Upload a photo/video to Instagram using the normal web UI flow.
+    Upload a photo/video directly to Instagram via API and auto-open in browser.
     """
     try:
         path = _normalize_path(media_path)
@@ -128,37 +116,17 @@ def _upload_instagram_media(media_path: str, caption: str = "", mode: str = "pos
         if path.suffix.lower() not in VIDEO_EXTS | IMAGE_EXTS:
             return f"Instagram upload error: unsupported media type: {path.suffix}"
 
-        _open_instagram_post_dialog()
-
-        # In the file chooser, paste the full file path.
-        try:
-            pyperclip.copy(str(path))
-            time.sleep(0.2)
-            pyautogui.hotkey("ctrl", "v")
-        except Exception:
-            pyautogui.write(str(path), interval=0.02)
-        time.sleep(0.5)
-        pyautogui.press("enter")
-        time.sleep(4.0)
-
-        # If caption is requested, attempt to place it into the caption box.
-        if caption:
-            try:
-                pyautogui.write(caption, interval=0.03)
-                time.sleep(0.2)
-            except Exception:
-                pass
-
-        # Advance through the common Instagram flow to the share step.
-        for _ in range(4):
-            pyautogui.press("tab")
-            time.sleep(0.12)
-        pyautogui.press("enter")
-        time.sleep(2.0)
-
-        return f"Instagram {mode} uploaded: {path.name}"
+        from actions.instagram_mcp import InstagramService
+        svc = InstagramService.instance()
+        if path.suffix.lower() in VIDEO_EXTS:
+            res = svc.post_reel(str(path), caption=caption, open_in_browser=True)
+            return f"Instagram Reel published: {res.get('reel_url')} (opened in browser)"
+        else:
+            res = svc.post_photo(str(path), caption=caption, open_in_browser=True)
+            return f"Instagram Photo published: {res.get('post_url')} (opened in browser)"
     except Exception as e:
-        return f"Instagram upload error: {e}"
+        return f"Instagram API upload error: {e}"
+
 
 
 def _send_telegram(receiver: str, message: str) -> str:

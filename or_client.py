@@ -85,7 +85,7 @@ class OpenRouterClient:
         self._headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type":  "application/json",
-            "HTTP-Referer":  "https://github.com/mark-xxv",
+            "HTTP-Referer":  "https://github.com/brahma-ai",
             "X-Title":       "Brahma Echo",
         }
 
@@ -375,8 +375,8 @@ if __name__ == "__main__":
     try:
         history = [
             {"role": "system",    "content": "You are a helpful assistant. Be brief."},
-            {"role": "user",      "content": "My name is Tony."},
-            {"role": "assistant", "content": "Hello Tony, how can I help you?"},
+            {"role": "user",      "content": "My name is Suryaansh."},
+            {"role": "assistant", "content": "Hello Suryaansh, how can I help you?"},
             {"role": "user",      "content": "What is my name?"},
         ]
         reply = client.multi_turn(history)

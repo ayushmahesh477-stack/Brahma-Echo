@@ -1,3 +1,11 @@
+from core import undo as undo_stack
+from core import audio_devices
+from core.echo import EchoGuard
+from core.hotkey import PushToTalk
+from memory import config_manager
+from memory.memory_manager import search_memory
+
+import core.boot_sentry
 import asyncio
 import threading
 import json
@@ -7,7 +15,6 @@ import socket
 import subprocess
 import sys
 import time
-import random
 import traceback
 import os
 import pyperclip
@@ -25,7 +32,7 @@ from google.genai import types
 from ui import BrahmaUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
-    should_extract_memory, extract_memory
+    should_extract_memory, extract_memory, auto_learn_interaction
 )
 
 from actions.file_processor import file_processor
@@ -41,7 +48,6 @@ from actions.youtube_video     import youtube_video
 from actions.desktop           import desktop_control
 from actions.browser_control   import browser_control
 from actions.file_controller   import file_controller
-from actions.website_builder   import website_builder
 from actions.office_builder     import create_presentation, create_spreadsheet
 from actions.docx_tools        import word_document
 from actions.pdf_tools         import create_pdf
@@ -53,7 +59,6 @@ from actions.brahma_connect    import (
     connect_pair_device,
     connect_disconnect_device,
 )
-from PyQt6.QtCore import QTimer
 from actions.web_search        import web_search as web_search_action
 from actions.computer_control  import computer_control
 from actions.game_updater      import game_updater
@@ -71,9 +76,12 @@ except Exception:
     DashboardServer = None
 
 try:
-    from actions.instagram_chat import start_daemon as start_ig_daemon, set_ig_prompt_callback
+    from actions.instagram_mcp import start_daemon as start_ig_daemon, set_ig_prompt_callback
 except ImportError:
-    start_ig_daemon = None
+    try:
+        from actions.instagram_chat import start_daemon as start_ig_daemon, set_ig_prompt_callback
+    except ImportError:
+        start_ig_daemon = None
 
 try:
     from brahma_connect.service import get_service as get_brahma_connect_service
@@ -218,10 +226,26 @@ def _load_system_prompt() -> str:
         custom = identity.get_custom_instructions()
         if custom:
             identity_str += f"Custom Instructions: {custom}\n\n"
-            
+
+        # Inject continuously learned rules and behavioral directives
+        try:
+            from core.learned_rules import LearnedRulesEngine
+            learned_directives = LearnedRulesEngine.get_prompt_injections()
+            if learned_directives:
+                identity_str += f"{learned_directives}\n\n"
+        except Exception as e_rules:
+            print(f"[LearnedRules] Error injecting rules into prompt: {e_rules}")
+
         return identity_str + base_prompt
     except Exception as e:
         print(f"Error injecting identity: {e}")
+        try:
+            from core.learned_rules import LearnedRulesEngine
+            learned_directives = LearnedRulesEngine.get_prompt_injections()
+            if learned_directives:
+                return f"{learned_directives}\n\n" + base_prompt
+        except Exception:
+            pass
         return base_prompt
 
 
@@ -229,13 +253,13 @@ def _speak_daily_briefing(ui=None) -> None:
     if ui and getattr(ui, "_overlay", None) and ui._overlay.isVisible():
         return
     try:
-        from actions.daily_briefing import compile_daily_briefing
+        from actions.daily_briefing import compile_unified_briefing
         from actions.attention_monitor import speak_native
-        text = compile_daily_briefing()
+        data, narrative = compile_unified_briefing()
         if ui:
-            ui.show_daily_briefing(text)
-            ui.write_log(f"Brahma Echo: {text}")
-        speak_native(text)
+            ui.show_daily_briefing(data)
+            ui.write_log(f"Brahma Echo: {narrative}")
+        speak_native(narrative)
     except Exception as e:
         print(f"[DailyBriefing] Error: {e}")
     
@@ -379,6 +403,30 @@ def _looks_like_website_request(text: str) -> bool:
     return has_web and (has_action or any(w in low for w in ("landing page", "homepage", "portfolio", "website", "web app", "web page")))
 
 
+def _looks_like_presentation_request(text: str) -> bool:
+    low = (text or "").lower()
+    ppt_keywords = (
+        "presentation", "powerpoint", "slideshow", "slides", "slide deck",
+        "pitch deck", "deck", "ppt", "pptx"
+    )
+    action_words = ("make", "create", "build", "design", "develop", "generate", "draft", "prepare")
+    has_keyword = any(re.search(rf"\b{re.escape(k)}\b", low) for k in ppt_keywords)
+    has_action = any(re.search(rf"\b{re.escape(a)}\b", low) for a in action_words)
+    return has_keyword and (has_action or any(k in low for k in ("slide deck", "pitch deck", "powerpoint", "pptx", "ppt")))
+
+
+def _looks_like_spreadsheet_request(text: str) -> bool:
+    low = (text or "").lower()
+    sheet_keywords = (
+        "spreadsheet", "excel", "sheet", "sheets", "workbook", "xlsx",
+        "tracker", "expense tracker", "budget sheet"
+    )
+    action_words = ("make", "create", "build", "design", "develop", "generate", "draft", "prepare")
+    has_keyword = any(re.search(rf"\b{re.escape(k)}\b", low) for k in sheet_keywords)
+    has_action = any(re.search(rf"\b{re.escape(a)}\b", low) for a in action_words)
+    return has_keyword and (has_action or any(k in low for k in ("spreadsheet", "excel sheet", "expense tracker", "budget sheet", "xlsx")))
+
+
 def _is_gemini_limit_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(token in msg for token in (
@@ -402,6 +450,7 @@ def _looks_like_screen_request(text: str) -> bool:
         "what's on my screen",
         "whats on my screen",
         "what is on my screen",
+        "what's on screen",
         "check my screen",
         "look at my screen",
         "analyze my screen",
@@ -410,11 +459,19 @@ def _looks_like_screen_request(text: str) -> bool:
         "tell me what is on my screen",
         "read my screen",
         "what does my screen say",
+        "explain this error",
+        "what's this error",
+        "what is this error",
+        "explain the error",
+        "look at this error",
+        "explain what's on my screen",
+        "inspect my screen",
+        "what am i looking at",
     )
     if any(p in t for p in direct_phrases):
         return True
     screen_words = ("screen", "display", "monitor", "window")
-    request_words = ("what", "check", "look", "analy", "analyse", "analyze", "read", "tell", "answer", "see")
+    request_words = ("what", "check", "look", "analy", "analyse", "analyze", "read", "tell", "answer", "see", "explain")
     return any(sw in t for sw in screen_words) and any(rw in t for rw in request_words)
 
 
@@ -505,9 +562,17 @@ def _update_memory_async(user_text: str, brahma_text: str) -> None:
     user_text   = (user_text   or "").strip()
     brahma_text = (brahma_text or "").strip()
 
-    if len(user_text) < 5 or user_text == _last_memory_input:
+    if len(user_text) < 4 or user_text == _last_memory_input:
         return
     _last_memory_input = user_text
+
+    # Fast deterministic heuristic extraction (Pillar 5 - Living Knowledge Graph)
+    try:
+        learned = auto_learn_interaction(user_text, brahma_text)
+        if learned:
+            print(f"[Memory] 🧠 Auto-learned: {list(learned.keys())}")
+    except Exception as exc:
+        print(f"[Memory] ⚠️ Auto-learn error: {exc}")
 
     try:
         api_key = _get_api_key()
@@ -530,34 +595,41 @@ def _memory_context_for_request(text: str) -> str:
 
 TOOL_DECLARATIONS = [
     {
-        "name": "computer_settings",
+        "name": "undo",
         "description": (
-            "Controls the computer's OS-level settings and hardware. Use this to change brightness, "
-            "toggle Wi-Fi, change volume, lock the screen, sleep the display, or shut down/restart the computer. "
-            "Also handles keyboard inputs (scrolling, typing, taking screenshots, window snapping)."
+            "Roll back the last change made to the computer — reversing a file move, "
+            "copy, create, or edit, a desktop organization, a volume or brightness change, "
+            "or a Wi-Fi toggle. Call this whenever the user says undo, revert, take it back, "
+            "put it back, restore, or says they made a mistake. "
+            "Use action='list' when they ask what can be undone."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
                 "action": {
                     "type": "STRING",
-                    "description": "Specific action if known (e.g., 'volume_up', 'volume_set', 'brightness_down', 'lock_screen', 'shutdown')"
+                    "description": "undo (default) — reverse the last change | list — show what can be undone",
                 },
-                "description": {
-                    "type": "STRING",
-                    "description": "Natural language description of what to do (e.g., 'turn the volume to 50%', 'put the computer to sleep')"
-                },
-                "value": {
-                    "type": "STRING",
-                    "description": "Any value associated with the action (e.g., '50' for volume level)"
-                },
-                "confirmed": {
-                    "type": "STRING",
-                    "description": "Pass 'yes' if the user explicitly confirmed a dangerous action like 'shutdown' or 'restart'."
-                }
             },
-            "required": []
-        }
+        },
+    },
+    {
+        "name": "recall_memory",
+        "description": (
+            "Search long-term memory for stored facts, preferences, user info, projects, or history. "
+            "Use this when the user asks 'do you remember', 'what is my...', or when context about "
+            "past instructions or preferences is needed."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {
+                    "type": "STRING",
+                    "description": "Keyword or topic to search for in memory (e.g. 'project', 'coffee', 'birthday', 'preference')",
+                },
+            },
+            "required": ["query"],
+        },
     },
     {
         "name": "dev_agent",
@@ -690,6 +762,90 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "instagram_send_dm",
+        "description": "Sends an Instagram direct message to a username or conversation thread, and automatically opens the chat in your browser.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "recipient": {
+                    "type": "STRING",
+                    "description": "The Instagram username (e.g. 'john_doe') or numeric thread ID."
+                },
+                "message": {
+                    "type": "STRING",
+                    "description": "The message text to send."
+                },
+                "open_in_browser": {
+                    "type": "BOOLEAN",
+                    "description": "Whether to auto-open the chat thread in your browser (default: true)."
+                }
+            },
+            "required": ["recipient", "message"]
+        }
+    },
+    {
+        "name": "instagram_post_photo",
+        "description": "Publishes a photo directly to your Instagram feed and automatically opens the live post in your browser.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "image_path": {
+                    "type": "STRING",
+                    "description": "Absolute path to the JPG or PNG image file to publish."
+                },
+                "caption": {
+                    "type": "STRING",
+                    "description": "The caption text with optional hashtags for the post."
+                },
+                "open_in_browser": {
+                    "type": "BOOLEAN",
+                    "description": "Whether to auto-open the published post in your browser (default: true)."
+                }
+            },
+            "required": ["image_path"]
+        }
+    },
+    {
+        "name": "instagram_post_reel",
+        "description": "Publishes a video or Reel directly to your Instagram account and automatically opens the live Reel in your browser.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "video_path": {
+                    "type": "STRING",
+                    "description": "Absolute path to the MP4 video file to publish."
+                },
+                "caption": {
+                    "type": "STRING",
+                    "description": "The caption text with optional hashtags."
+                },
+                "thumbnail_path": {
+                    "type": "STRING",
+                    "description": "Optional path to cover image."
+                },
+                "open_in_browser": {
+                    "type": "BOOLEAN",
+                    "description": "Whether to auto-open the published Reel in your browser (default: true)."
+                }
+            },
+            "required": ["video_path"]
+        }
+    },
+    {
+        "name": "instagram_get_user_info",
+        "description": "Looks up profile details, bio, follower count, following count, and verified badge for any Instagram handle.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "username": {
+                    "type": "STRING",
+                    "description": "The Instagram username to look up (e.g. 'natgeo' or 'openai')."
+                }
+            },
+            "required": ["username"]
+        }
+    },
+    {
         "name": "open_app",
         "description": (
             "Opens any application on the Windows computer. "
@@ -809,7 +965,8 @@ TOOL_DECLARATIONS = [
             "properties": {
                 "action":      {"type": "STRING", "description": "The action to perform"},
                 "description": {"type": "STRING", "description": "Natural language description of what to do"},
-                "value":       {"type": "STRING", "description": "Optional value: volume level, text to type, etc."}
+                "value":       {"type": "STRING", "description": "Optional value: volume level, text to type, etc."},
+                "confirmed":   {"type": "STRING", "description": "Pass 'yes' if the user explicitly confirmed a dangerous action like 'shutdown' or 'restart'."}
             },
             "required": []
         }
@@ -948,23 +1105,26 @@ TOOL_DECLARATIONS = [
     {
         "name": "browser_control",
         "description": (
-            "Controls the web browser. Use for: opening websites, searching the web, "
-            "navigating pages, clicking elements, filling forms, scrolling, tabs, back/forward, "
-            "refreshing, and any web-based task."
+            "Complete browser automation powered by Microsoft Playwright MCP. "
+            "Use for: opening websites, web searching, navigating, semantic accessibility snapshots, "
+            "clicking elements or snapshot references, typing, form filling, hovering, executing JavaScript, "
+            "taking screenshots, managing tabs, and any web-based task."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action":      {"type": "STRING", "description": "go_to | navigate | search | click | type | scroll | fill_form | smart_click | smart_type | get_text | press | back | forward | refresh | open_tab | new_tab | switch_tab | list_tabs | close"},
-                "url":         {"type": "STRING", "description": "URL for go_to action"},
-                "query":       {"type": "STRING", "description": "Search query for search action"},
-                "selector":    {"type": "STRING", "description": "CSS selector for click/type"},
-                "text":        {"type": "STRING", "description": "Text to click or type"},
-                "description": {"type": "STRING", "description": "Element description for smart_click/smart_type"},
+                "action":      {"type": "STRING", "description": "go_to | navigate | search | click | hover | type | scroll | fill_form | snapshot | find | evaluate | screenshot | press | back | forward | refresh | open_tab | new_tab | switch_tab | list_tabs | wait_for | select_option | upload | console | network | close"},
+                "url":         {"type": "STRING", "description": "URL for go_to/navigate"},
+                "query":       {"type": "STRING", "description": "Search query or search term for find"},
+                "selector":    {"type": "STRING", "description": "CSS selector for click/type/hover"},
+                "element":     {"type": "STRING", "description": "Snapshot element reference (e.g. e2)"},
+                "text":        {"type": "STRING", "description": "Text to click, type, or wait for"},
+                "description": {"type": "STRING", "description": "Element description for smart targeting"},
                 "direction":   {"type": "STRING", "description": "up or down for scroll"},
-                "key":         {"type": "STRING", "description": "Key name for press action"},
+                "key":         {"type": "STRING", "description": "Key name for press action (Enter, Tab, Escape, etc.)"},
+                "expression":  {"type": "STRING", "description": "JavaScript expression to evaluate in page"},
+                "path":        {"type": "STRING", "description": "File path for screenshot or upload"},
                 "tab":         {"type": "INTEGER", "description": "1-based tab index for switch_tab"},
-                "incognito":   {"type": "BOOLEAN", "description": "Open in private/incognito mode"},
             },
             "required": ["action"]
         }
@@ -993,12 +1153,30 @@ TOOL_DECLARATIONS = [
         }
     },
     {
-        "name": "desktop_control",
-        "description": "Controls the desktop: wallpaper, organize, clean, list, stats.",
+        "name": "smart_organizer",
+        "description": (
+            "Smart Desktop & Downloads Organizer MCP with safe transaction rollback (undo), "
+            "dry-run previews, duplicate file detection, empty folder cleanup, and archiving. "
+            "Use when the user asks to organize, preview, declutter, clean, or find duplicate files on the desktop, downloads, or any folder."
+        ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action": {"type": "STRING", "description": "wallpaper | wallpaper_url | organize | clean | list | stats | task"},
+                "action": {"type": "STRING", "description": "preview | organize | undo | find_duplicates | clean_empty_folders | archive_old"},
+                "target": {"type": "STRING", "description": "Target folder: 'desktop' | 'downloads' | 'documents' | 'pictures' or a custom directory path"},
+                "mode":   {"type": "STRING", "description": "by_type (categorizes into Documents, Images/Screenshots, Installers, Code, Archives, etc.) or by_date (YYYY-MM)"},
+                "days":   {"type": "INTEGER", "description": "Number of days for archive_old (default: 30)"}
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "desktop_control",
+        "description": "Controls the desktop: wallpaper, organize, preview, clean, undo, find_duplicates, list, stats.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING", "description": "wallpaper | wallpaper_url | organize | preview | clean | undo | find_duplicates | list | stats | task"},
                 "path":   {"type": "STRING", "description": "Image path for wallpaper"},
                 "url":    {"type": "STRING", "description": "Image URL for wallpaper_url"},
                 "mode":   {"type": "STRING", "description": "by_type or by_date for organize"},
@@ -1451,6 +1629,221 @@ TOOL_DECLARATIONS = [
             "required": []
         }
     },
+    {
+        "name": "google_workspace",
+        "description": (
+            "Full Google Workspace MCP for Gmail, Calendar, and Google Drive automation. "
+            "Supports: reading unread emails, listing inbox, searching emails, sending emails; "
+            "listing calendar events, adding calendar events; "
+            "searching Drive files, reading Drive files, and uploading files to Google Drive."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "service": {
+                    "type": "STRING",
+                    "description": "gmail | calendar | drive"
+                },
+                "action": {
+                    "type": "STRING",
+                    "description": "gmail actions: 'list', 'unread', 'read', 'search', 'send' | calendar actions: 'list', 'add' | drive actions: 'list', 'search', 'read', 'upload'"
+                },
+                "to": {
+                    "type": "STRING",
+                    "description": "Recipient email address for sending emails"
+                },
+                "subject": {
+                    "type": "STRING",
+                    "description": "Subject for sending or searching emails"
+                },
+                "body": {
+                    "type": "STRING",
+                    "description": "Body message for email"
+                },
+                "query": {
+                    "type": "STRING",
+                    "description": "Search query for Gmail or Drive"
+                },
+                "email_id": {
+                    "type": "STRING",
+                    "description": "ID of email to read"
+                },
+                "title": {
+                    "type": "STRING",
+                    "description": "Title/summary for calendar event"
+                },
+                "date": {
+                    "type": "STRING",
+                    "description": "Date for calendar event (YYYY-MM-DD or today/tomorrow)"
+                },
+                "time": {
+                    "type": "STRING",
+                    "description": "Time for calendar event (HH:MM)"
+                },
+                "duration_minutes": {
+                    "type": "NUMBER",
+                    "description": "Duration in minutes"
+                },
+                "file_path": {
+                    "type": "STRING",
+                    "description": "Local file path or name for Drive upload/read"
+                }
+            },
+            "required": ["service", "action"]
+        }
+    },
+    {
+        "name": "system_diagnostics",
+        "description": (
+            "Local OS Hardware and System Diagnostics MCP. "
+            "Checks battery health, power status, CPU usage and thermals, RAM utilization and top memory/CPU hogs, "
+            "storage drive space, and controls multi-monitor display brightness. Can safely terminate frozen apps."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "status | ram_hogs | cpu_hogs | kill | brightness | battery | disk"
+                },
+                "target": {
+                    "type": "STRING",
+                    "description": "Application name (e.g. 'chrome', 'notepad') or numerical PID to terminate"
+                },
+                "level": {
+                    "type": "NUMBER",
+                    "description": "Display brightness level from 0 to 100"
+                },
+                "monitor": {
+                    "type": "STRING",
+                    "description": "Optional target monitor name or index"
+                },
+                "relative": {
+                    "type": "BOOLEAN",
+                    "description": "Whether brightness level is relative (+10, -10)"
+                },
+                "limit": {
+                    "type": "NUMBER",
+                    "description": "Maximum number of processes to return (default: 5)"
+                }
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "auto_heal",
+        "description": (
+            "Autonomous Self-Healing and Continuous Self-Improvement System. "
+            "Analyzes tracebacks/exceptions in first-party codebase, synthesizes surgical code hotfixes, "
+            "validates AST syntax in safety sandbox, applies hotfixes with atomic backup, or rolls back changes. "
+            "Also manages learned behavioral rules and persistent user directives."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "status | heal | history | rollback | learn_rule | list_rules"
+                },
+                "error_traceback": {
+                    "type": "STRING",
+                    "description": "The exact exception traceback or error message to heal"
+                },
+                "rule_text": {
+                    "type": "STRING",
+                    "description": "The user preference, habit, or behavioral directive to remember permanently"
+                },
+                "category": {
+                    "type": "STRING",
+                    "description": "Category for learned rule (general, formatting, workflow, habit)"
+                },
+                "patch_id": {
+                    "type": "STRING",
+                    "description": "Specific patch ID to rollback (default: latest)"
+                }
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "calorie_counter",
+        "description": (
+            "Analyzes food and meals to report calories, macronutrients (protein, carbs, fat, fiber), "
+            "and dietary advice. Can capture a live snapshot via webcam, inspect an image file, "
+            "or analyze a spoken/typed meal description. "
+            "Use whenever the user asks about the calories or nutritional value of food."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {
+                    "type": "STRING",
+                    "description": "Food or meal description (e.g. 'How many calories in this plate?', 'I had 2 eggs and toast')."
+                },
+                "image_path": {
+                    "type": "STRING",
+                    "description": "Optional local file path to a food photo."
+                },
+                "use_camera": {
+                    "type": "BOOLEAN",
+                    "description": "True to capture a live photo from the webcam."
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "pushup_counter",
+        "description": (
+            "Live AI workout and repetition counter. Tracks reps, tempo, and calories burned "
+            "for pushups, squats, and bodyweight exercises through the webcam with live HUD overlay. "
+            "Use whenever the user asks to count pushups, track squats, or start a workout."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {
+                    "type": "STRING",
+                    "description": "User's request (e.g. 'count my pushups', 'track 20 squats')."
+                },
+                "exercise": {
+                    "type": "STRING",
+                    "description": "pushups | squats | general"
+                },
+                "target": {
+                    "type": "INTEGER",
+                    "description": "Target rep goal (e.g. 20)."
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "upload_video",
+        "description": (
+            "Automates video publishing to TikTok, YouTube Shorts, or Instagram. "
+            "Auto-locates recent videos on Desktop/Downloads, generates viral SEO captions and tags, "
+            "copies metadata to clipboard, reveals the file in Explorer, and launches the studio uploader."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "description": {
+                    "type": "STRING",
+                    "description": "Video topic, caption brief, or context (in user's language)."
+                },
+                "platform": {
+                    "type": "STRING",
+                    "description": "tiktok | youtube | instagram (default: tiktok)"
+                },
+                "video_path": {
+                    "type": "STRING",
+                    "description": "Optional path to the video file to publish."
+                }
+            },
+            "required": ["description"]
+        }
+    },
 ]
 
 
@@ -1494,6 +1887,22 @@ class BrahmaLive:
         self.ui.on_text_command = self._on_text_command
         self.ui.on_attention_action = self._on_attention_action
         self.ui.on_remote_clicked = self._make_remote_key
+        self._echo = EchoGuard()
+        self._resume_handle = None
+        self._ptt = None
+        self._ptt_held = False
+        try:
+            self._ptt_enabled = config_manager.get_push_to_talk_enabled()
+            if self._ptt_enabled:
+                self.set_push_to_talk(True)
+        except Exception:
+            self._ptt_enabled = False
+
+        try:
+            audio_devices.configure(SEND_SAMPLE_RATE, RECEIVE_SAMPLE_RATE)
+            audio_devices.prefetch()
+        except Exception:
+            pass
         self._last_activity = time.monotonic()
         self._idle_prompts = [
             "Hey, you there?",
@@ -1504,6 +1913,29 @@ class BrahmaLive:
         ]
         self._idle_speech_thread = threading.Thread(target=self._idle_speech_loop, daemon=True)
         self._idle_speech_thread.start()
+
+    def set_push_to_talk(self, enabled: bool) -> str:
+        self._ptt_enabled = bool(enabled)
+        self._ptt_held = False
+        if not enabled:
+            if self._ptt is not None:
+                self._ptt.stop()
+                self._ptt = None
+            return "off"
+        if self._ptt is None:
+            self._ptt = PushToTalk(self._on_ptt)
+        scope = self._ptt.start()
+        try:
+            self.ui.write_log(
+                f"SYS: Push-to-talk on — hold {self._ptt.label}"
+                + ("." if scope == "global" else " (works while window focused).")
+            )
+        except Exception:
+            pass
+        return scope
+
+    def _on_ptt(self, held: bool) -> None:
+        self._ptt_held = held
 
     def _reset_idle_activity(self):
         self._last_activity = time.monotonic()
@@ -1575,6 +2007,13 @@ class BrahmaLive:
         text = (text or "").strip()
         if not text:
             return
+        if len(text) > 4:
+            threading.Thread(
+                target=_update_memory_async,
+                args=(text, ""),
+                daemon=True
+            ).start()
+        self.ui.set_state("THINKING")
         try:
             stop_native_speech()
         except Exception:
@@ -1604,20 +2043,6 @@ class BrahmaLive:
 
         # Check for email command initiation
         lower = text.lower()
-
-        if "study mode" in lower or "study monitor" in lower:
-            try:
-                self.ui.open_study_monitor()
-                try:
-                    from core.speech import speak_native_text
-                    speak_native_text("Starting Study Mode. Stay focused!")
-                except Exception:
-                    pass
-                if self.ui:
-                    self.ui.update_status("Starting Study Monitor...")
-            except Exception as e:
-                print(f"Error starting study mode: {e}")
-            return
         if lower.startswith("email ") or lower.startswith("mail ") or "send email" in lower or "write email" in lower or "compose email" in lower:
             # Extract recipient
             rem = text
@@ -1693,8 +2118,63 @@ class BrahmaLive:
             developer_workspace = str(Path.home() / "Desktop" / "BrahmaProjects")
             Path(developer_workspace).mkdir(parents=True, exist_ok=True)
 
+        presentation_request = _looks_like_presentation_request(text)
+        spreadsheet_request = _looks_like_spreadsheet_request(text)
+
+        if presentation_request:
+            self.speak("Designing your presentation slides...")
+            if hasattr(self.ui, "begin_task_workspace"):
+                self.ui.begin_task_workspace(
+                    text,
+                    ["Researching topic", "Outlining slides", "Applying typography & theme", "Generating PowerPoint deck"],
+                    source=source or "local"
+                )
+
+            def _run_presentation():
+                try:
+                    from actions.office_generator import generate_presentation_from_prompt
+                    res = generate_presentation_from_prompt(text, player=self.ui, speak=self.speak)
+                    self.ui.write_log(f"[BrahmaOffice] {res}")
+                    if hasattr(self.ui, "update_task_workspace"):
+                        self.ui.update_task_workspace(status="Presentation Completed", output=res, percent=100)
+                    self.speak("Your presentation has been created and saved to Desktop, sir.")
+                except Exception as exc:
+                    self.ui.write_log(f"ERR: Presentation generation failed: {exc}")
+                    if hasattr(self.ui, "update_task_workspace"):
+                        self.ui.update_task_workspace(status="Generation Failed", output=str(exc), percent=0)
+                    self.speak("There was an issue creating the presentation, sir. Please check the logs.")
+
+            threading.Thread(target=_run_presentation, daemon=True).start()
+            return
+
+        if spreadsheet_request:
+            self.speak("Building your spreadsheet workbook...")
+            if hasattr(self.ui, "begin_task_workspace"):
+                self.ui.begin_task_workspace(
+                    text,
+                    ["Analyzing data structure", "Defining headers & formulas", "Formatting workbook", "Saving Excel spreadsheet"],
+                    source=source or "local"
+                )
+
+            def _run_spreadsheet():
+                try:
+                    from actions.office_generator import generate_spreadsheet_from_prompt
+                    res = generate_spreadsheet_from_prompt(text, player=self.ui, speak=self.speak)
+                    self.ui.write_log(f"[BrahmaOffice] {res}")
+                    if hasattr(self.ui, "update_task_workspace"):
+                        self.ui.update_task_workspace(status="Spreadsheet Completed", output=res, percent=100)
+                    self.speak("Your spreadsheet workbook has been created and saved to Desktop, sir.")
+                except Exception as exc:
+                    self.ui.write_log(f"ERR: Spreadsheet generation failed: {exc}")
+                    if hasattr(self.ui, "update_task_workspace"):
+                        self.ui.update_task_workspace(status="Generation Failed", output=str(exc), percent=0)
+                    self.speak("There was an issue creating the spreadsheet, sir. Please check the logs.")
+
+            threading.Thread(target=_run_spreadsheet, daemon=True).start()
+            return
+
         website_request = _looks_like_website_request(text)
-        code_request = _looks_like_code_request(text) and any(w in text.lower() for w in ("app", "website", "web", "program", "script", "project", "game", "calc", "html", "react"))
+        code_request = (not presentation_request and not spreadsheet_request) and _looks_like_code_request(text) and any(w in text.lower() for w in ("app", "website", "web", "program", "script", "project", "game", "calc", "html", "react"))
 
         if website_request or code_request:
             self.speak("Working on your project with Brahma Dev...")
@@ -1743,6 +2223,251 @@ class BrahmaLive:
 
             threading.Thread(target=_run_brahma_dev, daemon=True).start()
             return
+
+        # Google Workspace Direct Command Handling (Gmail & Calendar checks)
+        lower_cmd = text.lower().strip()
+        is_email_check = any(phrase in lower_cmd for phrase in ("check email", "check my email", "unread email", "read email", "my inbox", "check inbox", "show emails"))
+        is_calendar_check = any(phrase in lower_cmd for phrase in ("my schedule", "what's on my calendar", "check calendar", "my meetings", "schedule today", "events today"))
+
+        if is_email_check:
+            self.speak("Checking your Gmail inbox, sir...")
+            if hasattr(self.ui, "begin_task_workspace"):
+                self.ui.begin_task_workspace(
+                    text,
+                    ["Connecting to Gmail", "Fetching unread messages", "Parsing headers & body", "Summarizing inbox"],
+                    source=source or "local"
+                )
+            def _run_gw_email():
+                try:
+                    from actions.google_workspace_mcp import google_workspace
+                    res = google_workspace({"service": "gmail", "action": "unread"}, player=self.ui, speak=self.speak)
+                    self.ui.write_log(f"[GoogleWorkspace] {res}")
+                    if hasattr(self.ui, "update_task_workspace"):
+                        self.ui.update_task_workspace(status="Email Check Completed", output=res, percent=100)
+                    self.speak("Here are your latest emails, sir.")
+                except Exception as exc:
+                    self.ui.write_log(f"ERR: Gmail check failed: {exc}")
+                    if hasattr(self.ui, "update_task_workspace"):
+                        self.ui.update_task_workspace(status="Email Check Failed", output=str(exc), percent=0)
+                    self.speak("Unable to check emails. Please ensure your credentials are set up in Settings.")
+            threading.Thread(target=_run_gw_email, daemon=True).start()
+            return
+
+        if is_calendar_check:
+            self.speak("Checking your calendar schedule...")
+            if hasattr(self.ui, "begin_task_workspace"):
+                self.ui.begin_task_workspace(
+                    text,
+                    ["Connecting to Calendar", "Retrieving scheduled events", "Formatting timeline"],
+                    source=source or "local"
+                )
+            def _run_gw_calendar():
+                try:
+                    from actions.google_workspace_mcp import google_workspace
+                    res = google_workspace({"service": "calendar", "action": "list"}, player=self.ui, speak=self.speak)
+                    self.ui.write_log(f"[GoogleWorkspace] {res}")
+                    if hasattr(self.ui, "update_task_workspace"):
+                        self.ui.update_task_workspace(status="Schedule Retrieved", output=res, percent=100)
+                    self.speak("Here is your schedule, sir.")
+                except Exception as exc:
+                    self.ui.write_log(f"ERR: Calendar check failed: {exc}")
+                    if hasattr(self.ui, "update_task_workspace"):
+                        self.ui.update_task_workspace(status="Schedule Check Failed", output=str(exc), percent=0)
+                    self.speak("There was an issue checking your schedule, sir.")
+            threading.Thread(target=_run_gw_calendar, daemon=True).start()
+            return
+
+        # OS Hardware & Diagnostics Direct Command Handling (0 background API credits)
+        is_ram_check = any(p in lower_cmd for p in ("eating my ram", "ram hogs", "memory hogs", "check ram", "ram usage", "memory usage", "who is using ram"))
+        is_battery_check = any(p in lower_cmd for p in ("battery health", "check battery", "battery status", "battery percentage", "is laptop charging", "how much battery"))
+        is_brightness_req = any(p in lower_cmd for p in ("dim screen", "dim monitor", "increase brightness", "lower brightness", "set brightness", "screen brightness"))
+        is_kill_req = (lower_cmd.startswith("kill ") or lower_cmd.startswith("terminate ") or lower_cmd.startswith("force kill ")) and len(lower_cmd.split()) <= 4
+        is_diag_req = any(p in lower_cmd for p in ("system status", "system diagnostics", "hardware status", "computer vitals", "pc diagnostics"))
+
+        if is_ram_check:
+            self.speak("Scanning memory consumers...")
+            def _run_ram():
+                from actions.system_diagnostics_mcp import system_diagnostics
+                res = system_diagnostics({"action": "ram_hogs"}, player=self.ui, speak=self.speak)
+                self.ui.write_log(f"[Diagnostics] {res}")
+                if hasattr(self.ui, "finish_task_workspace"):
+                    self.ui.finish_task_workspace(res, "Memory analysis complete.", 100)
+            threading.Thread(target=_run_ram, daemon=True).start()
+            return
+
+        if is_battery_check:
+            def _run_battery():
+                from actions.system_diagnostics_mcp import system_diagnostics
+                res = system_diagnostics({"action": "battery"}, player=self.ui, speak=self.speak)
+                self.ui.write_log(f"[Diagnostics] {res}")
+                if hasattr(self.ui, "finish_task_workspace"):
+                    self.ui.finish_task_workspace(res, "Battery check complete.", 100)
+            threading.Thread(target=_run_battery, daemon=True).start()
+            return
+
+        if is_brightness_req:
+            import re
+            m = re.search(r"(\d+)", lower_cmd)
+            lvl = int(m.group(1)) if m else None
+            rel = "dim" in lower_cmd or "lower" in lower_cmd or "increase" in lower_cmd or "boost" in lower_cmd
+            if rel and lvl is None:
+                lvl = -20 if ("dim" in lower_cmd or "lower" in lower_cmd) else 20
+            def _run_brightness():
+                from actions.system_diagnostics_mcp import system_diagnostics
+                p = {"action": "brightness"}
+                if lvl is not None:
+                    p["level"] = lvl
+                    p["relative"] = rel
+                res = system_diagnostics(p, player=self.ui, speak=self.speak)
+                self.ui.write_log(f"[Diagnostics] {res}")
+                if hasattr(self.ui, "finish_task_workspace"):
+                    self.ui.finish_task_workspace(res, "Brightness adjusted.", 100)
+            threading.Thread(target=_run_brightness, daemon=True).start()
+            return
+
+        if is_kill_req:
+            target_app = lower_cmd.split(None, 1)[1].strip()
+            def _run_kill():
+                from actions.system_diagnostics_mcp import system_diagnostics
+                res = system_diagnostics({"action": "kill", "target": target_app, "force": "force" in lower_cmd}, player=self.ui, speak=self.speak)
+                self.ui.write_log(f"[Diagnostics] {res}")
+                if hasattr(self.ui, "finish_task_workspace"):
+                    self.ui.finish_task_workspace(res, "Process management complete.", 100)
+            threading.Thread(target=_run_kill, daemon=True).start()
+            return
+
+        if is_diag_req:
+            self.speak("Retrieving system diagnostics report...")
+            def _run_diag():
+                from actions.system_diagnostics_mcp import system_diagnostics
+                res = system_diagnostics({"action": "status"}, player=self.ui, speak=self.speak)
+                self.ui.write_log(f"[Diagnostics] {res}")
+                if hasattr(self.ui, "finish_task_workspace"):
+                    self.ui.finish_task_workspace(res, "System report ready.", 100)
+            threading.Thread(target=_run_diag, daemon=True).start()
+            return
+
+        # Autonomous Self-Healing & Continuous Learning Fast-Path
+        is_trigger_bug = any(p in lower_cmd for p in ("trigger test bug", "simulate bug", "test bug", "create bug", "simulate error", "trigger error", "break test"))
+        is_heal_cmd = any(p in lower_cmd for p in ("fix that bug", "fix the bug", "heal yourself", "auto heal", "patch yourself", "fix error", "fix this error"))
+        is_rollback_cmd = any(p in lower_cmd for p in ("undo last patch", "rollback patch", "revert patch", "undo patch"))
+        is_patch_history = any(p in lower_cmd for p in ("patch history", "patch log", "show patches", "auto heal status"))
+        is_learn_rule = (
+            lower_cmd.startswith("remember to ") or 
+            lower_cmd.startswith("remember that ") or 
+            (lower_cmd.startswith("always ") and len(lower_cmd.split()) > 2 and not lower_cmd.startswith("always open")) or
+            (lower_cmd.startswith("never ") and len(lower_cmd.split()) > 2) or
+            "new rule:" in lower_cmd
+        )
+
+        if is_trigger_bug:
+            def _run_test_bug():
+                try:
+                    from actions.test_action import test_action
+                    res = test_action({}, player=self.ui, speak=self.speak)
+                    self.ui.write_log(f"[TestAction] {res}")
+                    self.speak(f"Test action succeeded with no errors: {res}. The bug appears already healed!")
+                except Exception as exc:
+                    import traceback
+                    from actions.auto_heal_engine import AutoHealEngine
+                    tb_str = traceback.format_exc()
+                    AutoHealEngine.record_last_error(tb_str)
+                    err_msg = f"Simulated bug triggered in test_action.py: {type(exc).__name__}. Traceback captured! You can now say 'Brahma, fix that bug'."
+                    self.speak(err_msg)
+                    self.ui.write_log(f"[AutoHeal Test] {err_msg}")
+                    if hasattr(self.ui, "finish_task_workspace"):
+                        self.ui.finish_task_workspace(tb_str, "Simulated bug captured.", 100)
+            threading.Thread(target=_run_test_bug, daemon=True).start()
+            return
+
+        if is_heal_cmd:
+            self.speak("Analyzing last captured traceback and synthesizing hotfix...")
+            def _run_heal():
+                from actions.auto_heal_engine import auto_heal
+                res = auto_heal({"action": "heal"}, player=self.ui, speak=self.speak)
+                self.ui.write_log(f"[AutoHeal] {res}")
+                if hasattr(self.ui, "finish_task_workspace"):
+                    self.ui.finish_task_workspace(res, "Self-patching complete.", 100)
+            threading.Thread(target=_run_heal, daemon=True).start()
+            return
+
+        if is_rollback_cmd:
+            def _run_rollback():
+                from actions.auto_heal_engine import auto_heal
+                res = auto_heal({"action": "rollback"}, player=self.ui, speak=self.speak)
+                self.ui.write_log(f"[AutoHeal] {res}")
+                if hasattr(self.ui, "finish_task_workspace"):
+                    self.ui.finish_task_workspace(res, "Rollback complete.", 100)
+            threading.Thread(target=_run_rollback, daemon=True).start()
+            return
+
+        if is_patch_history:
+            def _run_history():
+                from actions.auto_heal_engine import auto_heal
+                action_type = "status" if "status" in lower_cmd else "history"
+                res = auto_heal({"action": action_type}, player=self.ui, speak=self.speak)
+                self.ui.write_log(f"[AutoHeal] {res}")
+                if hasattr(self.ui, "finish_task_workspace"):
+                    self.ui.finish_task_workspace(res, "Auto-heal report ready.", 100)
+            threading.Thread(target=_run_history, daemon=True).start()
+            return
+
+        if is_learn_rule:
+            rule_raw = lower_cmd.replace("remember that ", "").replace("remember to ", "").replace("new rule: ", "").strip()
+            def _run_learn():
+                from core.learned_rules import LearnedRulesEngine
+                res = LearnedRulesEngine.add_rule(rule_raw, origin="voice_directive")
+                msg = res.get("message", f"Understood. I have committed '{rule_raw}' to my continuous memory.")
+                self.speak(msg)
+                self.ui.write_log(f"[LearnedRules] {msg}")
+                if hasattr(self.ui, "finish_task_workspace"):
+                    self.ui.finish_task_workspace(msg, "Rule learned.", 100)
+            threading.Thread(target=_run_learn, daemon=True).start()
+            return
+
+        # Local PC Volume Control (Speakers)
+        is_volume_cmd = any(p in lower_cmd for p in ("volume up", "volume down", "mute volume", "mute audio", "unmute", "set volume", "increase volume", "decrease volume", "lower volume")) or (lower_cmd in ("mute", "unmute", "volume max"))
+        if is_volume_cmd and not any(m in lower_cmd for m in ("phone", "mobile", "android", "tablet")):
+            def _run_volume():
+                from actions.computer_settings import volume_up, volume_down, volume_mute, volume_set
+                import re
+                if any(w in lower_cmd for w in ("up", "increase", "higher", "raise")):
+                    volume_up()
+                    self.speak("Volume increased.")
+                elif any(w in lower_cmd for w in ("down", "decrease", "lower")):
+                    volume_down()
+                    self.speak("Volume decreased.")
+                elif "unmute" in lower_cmd or "mute" in lower_cmd:
+                    volume_mute()
+                    self.speak("Audio toggled.")
+                else:
+                    m = re.search(r"(\d+)", lower_cmd)
+                    if m:
+                        val = int(m.group(1))
+                        volume_set(val)
+                        self.speak(f"Volume set to {val} percent.")
+                    else:
+                        volume_up()
+                        self.speak("Volume adjusted.")
+            threading.Thread(target=_run_volume, daemon=True).start()
+            return
+
+        # Local PC App Launcher (runs on computer unless explicitly targeted to phone)
+        has_mobile_target = any(m in lower_cmd for m in ("on phone", "on my phone", "on mobile", "on my mobile", "on android", "on tablet"))
+        is_open_app_cmd = any(lower_cmd.startswith(prefix) for prefix in ("open app ", "open ", "launch app ", "launch ", "start app ", "start ")) and not has_mobile_target and not any(p in lower_cmd for p in ("website", "url", "http", "presentation", "sheet", "spreadsheet", "project", "code", "game"))
+        if is_open_app_cmd:
+            from actions.open_app import open_app, _APP_ALIASES
+            clean_app_candidate = lower_cmd
+            for prefix in ("open app ", "open ", "launch app ", "launch ", "start app ", "start "):
+                if clean_app_candidate.startswith(prefix):
+                    clean_app_candidate = clean_app_candidate[len(prefix):].strip()
+                    break
+            if clean_app_candidate in _APP_ALIASES or any(clean_app_candidate in k for k in _APP_ALIASES):
+                def _run_open_local_app():
+                    open_app({"app_name": clean_app_candidate}, player=self.ui)
+                    self.speak(f"Opening {clean_app_candidate}, sir.")
+                threading.Thread(target=_run_open_local_app, daemon=True).start()
+                return
 
         memory_ctx = _memory_context_for_request(text)
         routed_text = f"{memory_ctx}\n\nCurrent User Request:\n{text}" if memory_ctx else text
@@ -1807,6 +2532,7 @@ class BrahmaLive:
         if self._use_openrouter_first or not self._loop or not self.session:
             threading.Thread(target=self._fallback_reply, args=(text, memory_ctx), daemon=True).start()
             return
+        self.ui.set_state("THINKING")
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
                 turns={"parts": [{"text": routed_text}]},
@@ -1818,20 +2544,38 @@ class BrahmaLive:
 
     def _handle_smart_home_command(self, text: str, source: str = "local") -> bool:
         normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s%]", " ", text.lower())).strip()
-        connect_words = (
-            "phone", "mobile", "android", "tablet", "device", "devices", "brahma connect",
-            "my phone", "my mobile", "my tablet", "my android", "turn on flashlight", "flashlight",
-            "volume", "open url", "launch app", "get battery", "device info",
+        
+        # Don't touch commands targeted at phone or mobile
+        mobile_words = (
+            "phone", "mobile", "android", "tablet", "brahma connect",
+            "my phone", "my mobile", "my tablet", "my android", "flashlight", "torch"
         )
-        smart_home_words = (
-            "fan", "light", "lights", "lamp", "plug", "switch", "socket", "bulb",
-            "kasa", "atomberg", "room", "bedroom", "living room", "kitchen", "office",
-            "balcony", "bathroom", "home device", "smart home", "smart-home",
-        )
-        action_words = ("turn on", "turn off", "switch on", "switch off", "power on", "power off", "set", "speed", "brightness", "restart", "reboot", "toggle")
-        if any(word in normalized for word in connect_words):
+        if any(word in normalized for word in mobile_words):
             return False
-        if not any(word in normalized for word in smart_home_words) and not any(word in normalized for word in action_words):
+
+        # Don't hijack PC screen/monitor brightness
+        if any(w in normalized for w in ("screen", "monitor", "display", "laptop", "pc")) and "brightness" in normalized:
+            return False
+
+        smart_home_words = (
+            "fan", "fans", "light", "lights", "lamp", "plug", "socket", "outlet", "bulb",
+            "kasa", "atomberg", "bedroom", "living room", "kitchen", "office room",
+            "balcony", "bathroom", "hall", "dining", "smart home", "smart-home",
+            "ac", "air conditioner", "thermostat"
+        )
+        has_smart_word = any(word in normalized for word in smart_home_words)
+        if not has_smart_word:
+            try:
+                for d in self._smart_home.list_devices():
+                    d_name = str(d.get("name", "")).lower()
+                    d_room = str(d.get("room", "")).lower()
+                    if (d_name and d_name in normalized) or (d_room and d_room in normalized):
+                        has_smart_word = True
+                        break
+            except Exception:
+                pass
+
+        if not has_smart_word:
             return False
         try:
             result = self._smart_home.execute_command(text)
@@ -1910,13 +2654,18 @@ class BrahmaLive:
 
     def _handle_brahma_connect_command(self, text: str, source: str = "local") -> bool:
         normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s%]", " ", text.lower())).strip()
-        connect_words = (
-            "phone", "mobile", "android", "tablet", "device", "devices", "brahma connect",
-            "my phone", "my mobile", "my tablet", "my android", "turn on flashlight",
-            "turn off flashlight", "flashlight", "volume", "get battery", "battery", "launch app",
-            "open url", "device info", "my laptop", "my pc", "my computer",
-        )
-        if not any(word in normalized for word in connect_words):
+        
+        # Explicit mobile indicators: only route to phone if user explicitly mentions phone/mobile
+        # or asks for a phone-exclusive action (flashlight/torch, ring phone).
+        is_flashlight = "flashlight" in normalized or "torch" in normalized
+        is_ring_phone = any(p in normalized for p in ("ring phone", "ring my phone", "find my phone", "find phone", "locate phone"))
+        has_phone_ref = any(token in normalized for token in (
+            "phone", "mobile", "android", "tablet", "brahma connect",
+            "my phone", "my mobile", "my tablet", "my android"
+        ))
+
+        # Never hijack local PC commands (e.g. open chrome, volume up, pc battery) unless user says 'on phone'
+        if not (has_phone_ref or is_flashlight or is_ring_phone):
             return False
 
         try:
@@ -1937,14 +2686,20 @@ class BrahmaLive:
                 if any(token in normalized for token in (name, device_id, platform, "phone", "mobile", "android", "tablet")):
                     target = str(device.get("device_id") or device.get("name") or "").strip()
                     break
-            if not target and len(devices) == 1:
+            if not target and (has_phone_ref or is_flashlight or is_ring_phone) and len(devices) == 1:
                 target = str(devices[0].get("device_id") or devices[0].get("name") or "").strip()
             if not target:
                 return False
 
             action = None
             params: dict[str, object] = {}
-            if "flashlight" in normalized and ("turn on" in normalized or "switch on" in normalized or "power on" in normalized or "on" == normalized):
+            
+            # Check for complex multi-step mobile workflow first
+            # Examples: "open X and do Y", "search for Z on X", "message X on Y"
+            if (" and " in normalized or " search " in normalized or " play " in normalized or " message " in normalized or " tell " in normalized) and ("open " in normalized or "launch " in normalized or "app" in normalized):
+                action = "mobile_autopilot"
+                params["instruction"] = text
+            elif "flashlight" in normalized and ("turn on" in normalized or "switch on" in normalized or "power on" in normalized or "on" == normalized):
                 action = "flashlight_on"
             elif "flashlight" in normalized and ("turn off" in normalized or "switch off" in normalized or "power off" in normalized or "off" == normalized):
                 action = "flashlight_off"
@@ -1969,6 +2724,30 @@ class BrahmaLive:
                 
             if not action:
                 return False
+
+            if action == "mobile_autopilot":
+                # Route complex commands to the autopilot loop
+                def _run_autopilot():
+                    try:
+                        from actions.mobile_autopilot import mobile_autopilot
+                        result_json = mobile_autopilot({"target": target, "instruction": params["instruction"]}, player=self.ui, speak=self.speak)
+                        print(f"[Autopilot Result]: {result_json}")
+                        try:
+                            result_dict = json.loads(result_json)
+                            if not result_dict.get("success"):
+                                print(f"[Autopilot Error]: {result_dict.get('error') or result_dict}")
+                                self.speak(f"Autopilot encountered an error: {result_dict.get('error', 'unknown error')}")
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        print(f"Autopilot failed: {e}")
+                    finally:
+                        try:
+                            self.ui.set_state("IDLE")
+                        except Exception:
+                            pass
+                threading.Thread(target=_run_autopilot, daemon=True).start()
+                return True
 
             if action == "launch_app":
                 app_name = str(params.get("app_name") or "").strip()
@@ -2306,28 +3085,19 @@ class BrahmaLive:
             return data.get("intent", "IGNORE"), data.get("reply_text", "")
         except Exception:
             lower = text.lower()
-
-        if "study mode" in lower or "study monitor" in lower:
-            try:
-                self.ui.open_study_monitor()
-                try:
-                    from core.speech import speak_native_text
-                    speak_native_text("Starting Study Mode. Stay focused!")
-                except Exception:
-                    pass
-                if self.ui:
-                    self.ui.update_status("Starting Study Monitor...")
-            except Exception as e:
-                print(f"Error starting study mode: {e}")
-            return
-            if any(c in lower for c in ("cancel", "stop", "skip", "never mind", "abort")):
+            if any(c in lower for c in ("cancel", "stop", "skip", "never mind", "abort", "don't reply", "do not reply")):
                 return "CANCEL", ""
-            if any(a in lower for a in ("take over", "auto mode", "handle it", "you reply")):
+            if any(a in lower for a in ("take over", "auto mode", "handle it", "you reply", "auto reply", "take care of it")):
                 return "TAKE_OVER", ""
-            if lower.startswith("tell ") or lower.startswith("reply ") or lower.startswith("say ") or lower.startswith("send "):
-                import re
-                cleaned = re.sub(r"^(tell (him|her|them)?|reply( saying)?|say|send) ", "", text, flags=re.IGNORECASE)
-                return "MANUAL_REPLY", cleaned
+            for verb in ("reply", "tell him", "tell her", "tell them", "tell", "say", "send"):
+                if verb in lower:
+                    import re
+                    pattern = rf"^.*?\b{verb}\b(?:\s+(?:him|her|them|that|to\s+say|saying))?\s*"
+                    cleaned = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
+                    if cleaned:
+                        return "MANUAL_REPLY", cleaned
+            if len(text.strip().split()) >= 2 and not any(g in lower for g in ("hello", "hey brahma", "who are you")):
+                return "MANUAL_REPLY", text.strip()
             return "IGNORE", ""
 
     def _handle_ig_reply_flow(self, text: str) -> bool:
@@ -2349,7 +3119,7 @@ class BrahmaLive:
             if intent == "TAKE_OVER":
                 self.ui.write_log("SYS: Taking over Instagram thread.")
                 self.speak(f"I will now take over the chat with {username}.")
-                from actions.instagram_chat import add_auto_thread, send_direct_reply
+                from actions.instagram_mcp import add_auto_thread, send_direct_reply
                 add_auto_thread(thread_id)
                 def _generate_and_send():
                     try:
@@ -2360,34 +3130,26 @@ class BrahmaLive:
                 threading.Thread(target=_generate_and_send, daemon=True).start()
                 
             elif intent == "MANUAL_REPLY":
-                self.ui.write_log(f"SYS: Sending manual reply to {username}.")
+                self.ui.write_log(f"SYS: Sending manual reply to @{username}: '{payload}'")
                 self.speak("Message sent.")
-                from actions.instagram_chat import send_direct_reply
-                send_direct_reply(thread_id, payload)
+                from actions.instagram_mcp import send_direct_reply
+                def _do_send():
+                    try:
+                        send_direct_reply(thread_id, payload)
+                    except Exception as e:
+                        print(f"Error sending manual reply to @{username}: {e}")
+                threading.Thread(target=_do_send, daemon=True).start()
                 
             elif intent == "IGNORE":
-                return False # Let the main command loop handle this input
+                return False
                 
             self._ig_reply_mode = False
             self._ig_pending_thread = None
             return True
         return False
 
+    def _handle_email_flow(self, text: str) -> bool:
         lower = text.lower()
-
-        if "study mode" in lower or "study monitor" in lower:
-            try:
-                self.ui.open_study_monitor()
-                try:
-                    from core.speech import speak_native_text
-                    speak_native_text("Starting Study Mode. Stay focused!")
-                except Exception:
-                    pass
-                if self.ui:
-                    self.ui.update_status("Starting Study Monitor...")
-            except Exception as e:
-                print(f"Error starting study mode: {e}")
-            return
         if any(cancel in lower for cancel in ("cancel", "never mind", "skip", "stop", "abort")):
             self._email_mode = False
             self._email_step = 0
@@ -2659,6 +3421,38 @@ class BrahmaLive:
         elif not self.ui.muted:
             self.ui.set_state("LISTENING")
 
+    def trigger_barge_in(self):
+        """Immediately interrupts AI speech playback and switches state to LISTENING."""
+        with self._speaking_lock:
+            if not self._is_speaking:
+                return
+            self._is_speaking = False
+
+        try:
+            from actions.attention_monitor import stop_native_speech
+            stop_native_speech()
+        except Exception:
+            pass
+
+        try:
+            if self.audio_in_queue:
+                while not self.audio_in_queue.empty():
+                    try:
+                        self.audio_in_queue.get_nowait()
+                    except Exception:
+                        break
+        except Exception:
+            pass
+
+        try:
+            from sound_manager import SoundManager
+            SoundManager.instance().play_listening_start()
+        except Exception:
+            pass
+
+        if hasattr(self, "ui") and self.ui and not self.ui.muted:
+            self.ui.set_state("LISTENING")
+
     def speak(self, text: str):
         text = (text or "").strip()
         if not text:
@@ -2705,7 +3499,22 @@ class BrahmaLive:
             f"Use this to calculate exact times for reminders.\n\n"
         )
 
+        loc_ctx = ""
+        try:
+            from core.device_location import get_device_city
+            dev_city = get_device_city(default="")
+            if dev_city and dev_city != "Local Area":
+                loc_ctx = (
+                    f"[DEVICE PHYSICAL LOCATION]\n"
+                    f"Current device location: {dev_city}\n"
+                    f"Use this location for local weather, time zone, and neighborhood context.\n\n"
+                )
+        except Exception:
+            pass
+
         parts = [time_ctx]
+        if loc_ctx:
+            parts.append(loc_ctx)
         if mem_str:
             parts.append(mem_str)
         parts.append(sys_prompt)
@@ -2723,7 +3532,7 @@ class BrahmaLive:
             input_audio_transcription={},
             system_instruction="\n".join(parts),
             tools=[{"function_declarations": TOOL_DECLARATIONS}],
-            session_resumption=types.SessionResumptionConfig(),
+            session_resumption=types.SessionResumptionConfig(handle=getattr(self, '_resume_handle', None)),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -2740,6 +3549,38 @@ class BrahmaLive:
         print(f"[BRAHMA ECHO] 🔧 {name}  {args}")
         self.speak(f"Working on {name.replace('_', ' ')}...")
         self.ui.set_state("THINKING")
+
+        # Trigger Brahma Right Wing: Live Operations & Sources Telemetry
+        tool_title = name.replace("_", " ").title()
+        brief_query = (
+            args.get("query")
+            or args.get("description")
+            or args.get("topic")
+            or args.get("prompt")
+            or args.get("title")
+            or args.get("action")
+            or ""
+        )
+        sources = []
+        if "url" in args:
+            sources.append(args["url"])
+        if "file_path" in args:
+            sources.append(Path(args["file_path"]).name)
+        elif "path" in args:
+            sources.append(Path(args["path"]).name)
+        elif "query" in args and name in ("web_search", "flight_finder", "youtube_video"):
+            sources.append(f"Query: {str(args['query'])[:28]}")
+
+        try:
+            self.ui.show_hud_operation(
+                title=f"{tool_title.upper()} ACTIVE",
+                step=f"Processing: {brief_query[:75]}" if brief_query else f"Executing {tool_title}...",
+                sources=sources,
+                tool=name
+            )
+        except Exception:
+            pass
+
         try:
             self.ui.update_task_workspace(
                 title=f"Running {name}",
@@ -2749,6 +3590,26 @@ class BrahmaLive:
             )
         except Exception:
             pass
+        if name == "undo":
+            action = args.get("action", "undo")
+            if action == "list":
+                items = undo_stack.history()
+                result = ("Things I can undo, most recent first:\n" +
+                          "\n".join(f"  • {item}" for item in items)
+                         ) if items else "I have not changed anything I can undo yet."
+            else:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, undo_stack.undo_last)
+            self.speak("Undone.")
+            self.ui.set_state("LISTENING")
+            return types.FunctionResponse(name=name, id=fc.id, response={"result": result})
+
+        elif name == "recall_memory":
+            query = args.get("query", "")
+            result = search_memory(query, limit=8)
+            self.ui.set_state("LISTENING")
+            return types.FunctionResponse(name=name, id=fc.id, response={"result": result})
+
         if name == "save_memory":
             category = args.get("category", "notes")
             key      = args.get("key", "")
@@ -2787,8 +3648,77 @@ class BrahmaLive:
                 
             elif name == "check_instagram_messages":
                 self.ui.write_log("SYS: Checking Instagram messages...")
-                from actions.instagram_chat import get_recent_messages
-                result = await loop.run_in_executor(None, get_recent_messages, 5)
+                if hasattr(self.ui, "show_hud_operation"):
+                    self.ui.show_hud_operation("Instagram Inbox", "Fetching recent direct messages...", sources=["instagram.com"])
+                from actions.instagram_mcp import get_recent_messages, InstagramService
+                amount = int(args.get("amount", 5)) if args else 5
+                result = await loop.run_in_executor(None, get_recent_messages, amount)
+                if hasattr(self.ui, "show_hud_deliverable"):
+                    try:
+                        inbox_data = InstagramService.instance().get_inbox(amount=amount)
+                        bullets = [f"@{item['sender']}: {item['last_message']}" for item in inbox_data[:4]]
+                        self.ui.show_hud_deliverable("Instagram Inbox", summary=f"Retrieved {len(inbox_data)} recent conversations", bullets=bullets, kind="result")
+                    except Exception:
+                        pass
+
+            elif name == "instagram_send_dm":
+                recipient = args.get("recipient", "")
+                message = args.get("message", "")
+                open_browser = args.get("open_in_browser", True)
+                self.ui.write_log(f"SYS: Sending Instagram DM to @{recipient}...")
+                if hasattr(self.ui, "show_hud_operation"):
+                    self.ui.show_hud_operation("Instagram DM", f"Messaging @{recipient}...", sources=["instagram.com"])
+                from actions.instagram_mcp import InstagramService
+                def _do_send():
+                    return InstagramService.instance().send_dm(recipient, message, open_in_browser=open_browser)
+                res = await loop.run_in_executor(None, _do_send)
+                if hasattr(self.ui, "show_hud_deliverable"):
+                    self.ui.show_hud_deliverable("Instagram DM Sent", summary=f"Direct message sent to @{res.get('recipient')}", bullets=[f"Message: {message[:60]}...", "Opened in browser for verification"], kind="result")
+                result = f"Direct message sent to @{recipient}. Chat opened in browser: {res.get('browser_url')}"
+
+            elif name == "instagram_post_photo":
+                image_path = args.get("image_path", "")
+                caption = args.get("caption", "")
+                open_browser = args.get("open_in_browser", True)
+                self.ui.write_log(f"SYS: Publishing photo to Instagram...")
+                if hasattr(self.ui, "show_hud_operation"):
+                    self.ui.show_hud_operation("Instagram Post", f"Uploading {Path(image_path).name}...", sources=["instagram.com"])
+                from actions.instagram_mcp import InstagramService
+                def _do_post():
+                    return InstagramService.instance().post_photo(image_path, caption=caption, open_in_browser=open_browser)
+                res = await loop.run_in_executor(None, _do_post)
+                if hasattr(self.ui, "show_hud_deliverable"):
+                    self.ui.show_hud_deliverable("Instagram Post Published", summary="Photo published live to Instagram!", bullets=[f"URL: {res.get('post_url')}", f"Caption: {caption[:60]}..."], kind="deliverable")
+                result = f"Successfully published photo to Instagram! Post URL: {res.get('post_url')}"
+
+            elif name == "instagram_post_reel":
+                video_path = args.get("video_path", "")
+                caption = args.get("caption", "")
+                thumb = args.get("thumbnail_path")
+                open_browser = args.get("open_in_browser", True)
+                self.ui.write_log(f"SYS: Publishing Reel to Instagram...")
+                if hasattr(self.ui, "show_hud_operation"):
+                    self.ui.show_hud_operation("Instagram Reel", f"Uploading {Path(video_path).name}...", sources=["instagram.com"])
+                from actions.instagram_mcp import InstagramService
+                def _do_reel():
+                    return InstagramService.instance().post_reel(video_path, caption=caption, thumbnail_path=thumb, open_in_browser=open_browser)
+                res = await loop.run_in_executor(None, _do_reel)
+                if hasattr(self.ui, "show_hud_deliverable"):
+                    self.ui.show_hud_deliverable("Instagram Reel Published", summary="Reel published live to Instagram!", bullets=[f"URL: {res.get('reel_url')}", f"Caption: {caption[:60]}..."], kind="deliverable")
+                result = f"Successfully published Reel to Instagram! Reel URL: {res.get('reel_url')}"
+
+            elif name == "instagram_get_user_info":
+                username = args.get("username", "")
+                self.ui.write_log(f"SYS: Looking up Instagram user @{username}...")
+                if hasattr(self.ui, "show_hud_operation"):
+                    self.ui.show_hud_operation("Instagram Intelligence", f"Looking up @{username}...", sources=["instagram.com"])
+                from actions.instagram_mcp import InstagramService
+                def _do_lookup():
+                    return InstagramService.instance().get_user_profile(username)
+                res = await loop.run_in_executor(None, _do_lookup)
+                if hasattr(self.ui, "show_hud_deliverable"):
+                    self.ui.show_hud_deliverable(f"@{res.get('username')} Profile", summary=res.get("bio", "No bio"), bullets=[f"Followers: {res.get('followers', 0):,}", f"Following: {res.get('following', 0):,}", f"Posts: {res.get('posts_count', 0):,}", f"Verified: {'Yes' if res.get('is_verified') else 'No'}"], kind="result")
+                result = json.dumps(res, indent=2)
 
             elif name == "instagram_reply":
                 action = args.get("action")
@@ -2796,9 +3726,9 @@ class BrahmaLive:
                 if getattr(self, "_ig_pending_thread", None):
                     thread_id = self._ig_pending_thread.get("thread_id")
                     username = self._ig_pending_thread.get("username")
+                    from actions.instagram_mcp import add_auto_thread, send_direct_reply
                     if action == "take_over":
                         self.ui.write_log("SYS: Taking over Instagram thread via tool.")
-                        from actions.instagram_chat import add_auto_thread, send_direct_reply
                         add_auto_thread(thread_id)
                         message_text = self._ig_pending_thread.get('message')
                         def _generate_and_send():
@@ -2808,17 +3738,37 @@ class BrahmaLive:
                             except Exception as e:
                                 print(f"Error taking over thread: {e}")
                         threading.Thread(target=_generate_and_send, daemon=True).start()
-                        result = f"Successfully took over the chat with {username}. The backend will now automatically reply to them."
+                        result = f"Successfully took over the chat with @{username}. The backend will now automatically reply to them."
                     else:
-                        self.ui.write_log(f"SYS: Sending manual reply to {username}.")
-                        from actions.instagram_chat import send_direct_reply
+                        self.ui.write_log(f"SYS: Sending manual reply to @{username}.")
                         send_direct_reply(thread_id, reply_text)
-                        result = f"Successfully sent the manual reply to {username}."
+                        result = f"Successfully sent manual reply to @{username} and opened thread in browser."
                         
                     self._ig_reply_mode = False
                     self._ig_pending_thread = None
                 else:
-                    result = "Error: There is no pending Instagram message to reply to right now."
+                    recipient = args.get("recipient") or args.get("username")
+                    from actions.instagram_mcp import InstagramService, add_auto_thread
+                    thread_id = None
+                    if not recipient:
+                        try:
+                            inbox = InstagramService.instance().get_inbox(amount=1)
+                            if inbox:
+                                recipient = inbox[0].get("sender")
+                                thread_id = inbox[0].get("thread_id")
+                        except Exception:
+                            pass
+
+                    if recipient:
+                        if action == "take_over":
+                            add_auto_thread(thread_id or recipient)
+                            result = f"Successfully took over the chat with @{recipient}. Brahma Echo will now automatically reply."
+                        else:
+                            res = InstagramService.instance().send_dm(recipient, reply_text, open_in_browser=True)
+                            result = f"Sent reply to @{recipient}: '{reply_text}'. Thread opened in browser."
+                        self._ig_reply_mode = False
+                    else:
+                        result = "Could not find a recent conversation to reply to. Please specify who you want to message."
 
             elif name == "system_manager":
                 from actions.system_manager import run as sm_run
@@ -2868,17 +3818,33 @@ class BrahmaLive:
                 result = r or "Done."
 
             elif name == "presentation_builder":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: create_presentation(parameters=args, player=self.ui)
-                )
+                if not args.get("slides") and not args.get("outline"):
+                    from actions.office_generator import generate_presentation_from_prompt
+                    topic = args.get("topic") or args.get("title") or "Presentation"
+                    r = await loop.run_in_executor(
+                        None,
+                        lambda: generate_presentation_from_prompt(topic, player=self.ui, speak=self.speak)
+                    )
+                else:
+                    r = await loop.run_in_executor(
+                        None,
+                        lambda: create_presentation(parameters=args, player=self.ui)
+                    )
                 result = r or "Presentation created."
 
             elif name == "spreadsheet_builder":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: create_spreadsheet(parameters=args, player=self.ui)
-                )
+                if not args.get("worksheets") and not args.get("sheets"):
+                    from actions.office_generator import generate_spreadsheet_from_prompt
+                    topic = args.get("topic") or args.get("title") or "Spreadsheet"
+                    r = await loop.run_in_executor(
+                        None,
+                        lambda: generate_spreadsheet_from_prompt(topic, player=self.ui, speak=self.speak)
+                    )
+                else:
+                    r = await loop.run_in_executor(
+                        None,
+                        lambda: create_spreadsheet(parameters=args, player=self.ui)
+                    )
                 result = r or "Spreadsheet created."
 
 
@@ -2924,6 +3890,11 @@ class BrahmaLive:
                 r = await loop.run_in_executor(None, lambda: self._smart_home.execute_command(command_text))
                 result = str((r or {}).get("detail") or "Smart-home command completed.")
 
+            elif name in ("smart_organizer", "desktop_organizer"):
+                from actions.desktop_organizer_mcp import smart_organizer
+                r = await loop.run_in_executor(None, lambda: smart_organizer(parameters=args, player=self.ui, speak=self.speak))
+                result = r or "Done."
+
             elif name == "desktop_control":
                 r = await loop.run_in_executor(None, lambda: desktop_control(parameters=args, player=self.ui))
                 result = r or "Done."
@@ -2932,7 +3903,12 @@ class BrahmaLive:
                 from agent.task_queue import get_queue, TaskPriority
                 priority_map = {"low": TaskPriority.LOW, "normal": TaskPriority.NORMAL, "high": TaskPriority.HIGH}
                 priority = priority_map.get(args.get("priority", "normal").lower(), TaskPriority.NORMAL)
-                task_id  = get_queue().submit(goal=args.get("goal", ""), priority=priority, speak=self.speak)
+                task_id  = get_queue().submit(
+                    goal=args.get("goal", ""),
+                    priority=priority,
+                    speak=self.speak,
+                    player=self.ui
+                )
                 result   = f"Task started (ID: {task_id})."
 
             elif name == "web_search":
@@ -2976,6 +3952,28 @@ class BrahmaLive:
                 from actions.calendar_scheduler import calendar_scheduler
                 r = await loop.run_in_executor(None, lambda: calendar_scheduler(parameters=args, player=self.ui, speak=self.speak))
                 result = r or "Done."
+            elif name in ("google_workspace", "gmail", "google_calendar", "google_drive", "workspace") or name.startswith("workspace_"):
+                from actions.google_workspace_mcp import google_workspace
+                p = dict(args or {})
+                if name.startswith("workspace_"):
+                    parts = name.split("_", 2)
+                    if len(parts) > 1:
+                        p.setdefault("service", parts[1])
+                    if len(parts) > 2:
+                        p.setdefault("action", parts[2])
+                r = await loop.run_in_executor(None, lambda: google_workspace(parameters=p, player=self.ui, speak=self.speak))
+                result = r or "Google Workspace task completed."
+            elif name in ("system_diagnostics", "diagnostics", "os_hardware", "hardware_control", "ram_hogs", "kill_process", "brightness_control"):
+                from actions.system_diagnostics_mcp import system_diagnostics
+                p = dict(args or {})
+                if name == "ram_hogs":
+                    p.setdefault("action", "ram_hogs")
+                elif name == "kill_process":
+                    p.setdefault("action", "kill")
+                elif name == "brightness_control":
+                    p.setdefault("action", "brightness")
+                r = await loop.run_in_executor(None, lambda: system_diagnostics(parameters=p, player=self.ui, speak=self.speak))
+                result = r or "Diagnostics completed."
             elif name in ("daily_briefing", "briefing"):
                 from actions.daily_briefing import daily_briefing
                 r = await loop.run_in_executor(None, lambda: daily_briefing(parameters=args, player=self.ui, speak=self.speak))
@@ -2984,6 +3982,25 @@ class BrahmaLive:
                 from actions.unlock_device import unlock_device
                 r = await loop.run_in_executor(None, lambda: unlock_device(parameters=args, player=self.ui))
                 result = r or "Done."
+            elif name in ("auto_heal", "self_patch", "rollback"):
+                from actions.auto_heal_engine import auto_heal
+                p = dict(args or {})
+                if name == "rollback":
+                    p.setdefault("action", "rollback")
+                r = await loop.run_in_executor(None, lambda: auto_heal(parameters=p, player=self.ui, speak=self.speak))
+                result = r or "Auto-heal completed."
+            elif name in ("calorie_counter", "nutrition_scan", "food_analysis"):
+                from actions.calorie_counter import calorie_counter
+                r = await loop.run_in_executor(None, lambda: calorie_counter(parameters=args, player=self.ui, speak=self.speak))
+                result = r or "Nutrition analysis complete."
+            elif name in ("pushup_counter", "workout_tracker", "rep_counter"):
+                from actions.pushup_counter import pushup_counter
+                r = await loop.run_in_executor(None, lambda: pushup_counter(parameters=args, player=self.ui, speak=self.speak))
+                result = r or "Workout session complete."
+            elif name in ("upload_video", "video_publisher", "publish_video"):
+                from actions.upload_video import upload_video
+                r = await loop.run_in_executor(None, lambda: upload_video(parameters=args, player=self.ui, speak=self.speak))
+                result = r or "Video publishing ready."
             elif name == "shutdown_brahma":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("Goodbye, sir.")
@@ -2999,12 +4016,47 @@ class BrahmaLive:
 
         except Exception as e:
             result = f"Tool '{name}' failed: {e}"
+            tb_str = traceback.format_exc()
             traceback.print_exc()
+            try:
+                from actions.auto_heal_engine import AutoHealEngine
+                AutoHealEngine.record_last_error(tb_str)
+            except Exception:
+                pass
             self.speak_error(name, e)
 
         try:
             self.speak(f"{name.replace('_', ' ')} completed.")
             self.ui.finish_task_workspace(result, "Task completed.", 100)
+        except Exception:
+            pass
+
+        # Trigger Brahma Left Wing: Final Deliverables & Results
+        try:
+            import re
+            file_match = re.search(r'([A-Za-z]:\\[^\s"\'<>`\r\n]+\.(?:pdf|docx|xlsx|pptx|png|jpg|mp4|py|html|json|txt))', str(result))
+            detected_file = file_match.group(1).strip() if file_match else None
+            if not detected_file and "file_path" in args:
+                p_cand = Path(args["file_path"])
+                if p_cand.exists():
+                    detected_file = str(p_cand.resolve())
+
+            res_str = str(result)
+            bullets = []
+            for l in res_str.splitlines():
+                cl = l.strip()
+                if (cl.startswith(("-", "*", "•", ">")) or cl.startswith(tuple("123456789."))) and len(cl) > 3:
+                    bullets.append(cl.lstrip("-*•>0123456789. ").strip())
+                elif len(cl) > 15 and not cl.startswith("#") and len(bullets) < 4:
+                    bullets.append(cl)
+
+            self.ui.show_hud_deliverable(
+                title=f"{tool_title.upper()} DELIVERABLE",
+                summary=res_str[:160] if not bullets else "",
+                bullets=bullets[:5],
+                file_path=detected_file,
+                kind=name
+            )
         except Exception:
             pass
 
@@ -3077,24 +4129,44 @@ class BrahmaLive:
         loop = asyncio.get_event_loop()
         import numpy as np
 
+        _mic_name = config_manager.get_input_device()
+        _mic_dev = audio_devices.resolve(_mic_name, "input") if _mic_name else None
+
         def callback(indata, frames, time_info, status):
             with self._speaking_lock:
                 brahma_speaking = self._is_speaking
             if self._phone_active:
                 return
+
+            if getattr(self, "_ptt_enabled", False) and not getattr(self, "_ptt_held", False):
+                data = np.zeros_like(indata).tobytes()
+                loop.call_soon_threadsafe(
+                    self.out_queue.put_nowait,
+                    {"data": data, "mime_type": "audio/pcm"}
+                )
+                return
             
             if not self.ui.muted or getattr(self.ui, "_wakeword_listening", False):
-                # Calculate RMS volume of the chunk
-                rms = np.sqrt(np.mean(np.square(indata, dtype=np.float32)))
+                lvl = float(np.sqrt(np.mean(np.square(indata, dtype=np.float32))))
                 
-                # Smart Echo Gate: High threshold if AI is speaking, very low if silent
-                threshold = 1200.0 if brahma_speaking else 10.0
-                
-                if rms > threshold:
-                    data = indata.tobytes()
+                if brahma_speaking:
+                    if self._echo.is_user_speech(indata, SEND_SAMPLE_RATE, lvl) and lvl > 28.0:
+                        loop.call_soon_threadsafe(self.trigger_barge_in)
+                        data = indata.tobytes()
+                    else:
+                        data = np.zeros_like(indata).tobytes()
                 else:
-                    # Stream pure silence to keep timeline intact but prevent echo
-                    data = np.zeros_like(indata).tobytes()
+                    if not self.ui.muted:
+                        try:
+                            self.ui.set_audio_level(min(1.0, lvl / 1200.0))
+                        except Exception:
+                            pass
+                    if self._echo._hist:
+                        self._echo.reset()
+                    if lvl > 10.0:
+                        data = indata.tobytes()
+                    else:
+                        data = np.zeros_like(indata).tobytes()
                     
                 loop.call_soon_threadsafe(
                     self.out_queue.put_nowait,
@@ -3107,9 +4179,10 @@ class BrahmaLive:
                 channels=CHANNELS,
                 dtype="int16",
                 blocksize=CHUNK_SIZE,
+                device=_mic_dev,
                 callback=callback,
             ):
-                print("[BRAHMA ECHO] 🎤 Mic stream open")
+                print(f"[BRAHMA ECHO] 🎤 Mic stream open ({_mic_name or 'Default'})")
                 while True:
                     await asyncio.sleep(0.1)
         except Exception as e:
@@ -3123,6 +4196,10 @@ class BrahmaLive:
         try:
             while True:
                 async for response in self.session.receive():
+                    _sru = getattr(response, "session_resumption_update", None)
+                    if _sru is not None:
+                        if getattr(_sru, "resumable", False) and getattr(_sru, "new_handle", None):
+                            self._resume_handle = _sru.new_handle
 
                     if response.data:
                         self.audio_in_queue.put_nowait(response.data)
@@ -3173,11 +4250,13 @@ class BrahmaLive:
                                 ).start()
 
                     if response.tool_call:
+                        self.ui.set_state("EXECUTING")
                         fn_responses = []
                         for fc in response.tool_call.function_calls:
                             print(f"[BRAHMA ECHO] 📞 {fc.name}")
                             fr = await self._execute_tool(fc)
                             fn_responses.append(fr)
+                        self.ui.set_state("THINKING")
                         await self.session.send_tool_response(
                             function_responses=fn_responses
                         )
@@ -3190,18 +4269,33 @@ class BrahmaLive:
     async def _play_audio(self):
         print("[BRAHMA ECHO] 🔊 Play started")
         loop = asyncio.get_event_loop()
+        import numpy as np
+
+        _spk_name = config_manager.get_output_device()
+        _spk_dev = audio_devices.resolve(_spk_name, "output") if _spk_name else None
 
         stream = sd.RawOutputStream(
             samplerate=RECEIVE_SAMPLE_RATE,
             channels=CHANNELS,
             dtype="int16",
             blocksize=CHUNK_SIZE,
+            device=_spk_dev,
         )
         stream.start()
         try:
             while True:
                 chunk = await self.audio_in_queue.get()
+                with self._speaking_lock:
+                    if not self._is_speaking:
+                        continue
                 self.set_speaking(True)
+                try:
+                    pcm = np.frombuffer(chunk, dtype=np.int16)
+                    lvl = float(np.sqrt(np.mean(np.square(pcm, dtype=np.float32))))
+                    self._echo.note_output(pcm, RECEIVE_SAMPLE_RATE, lvl)
+                    self.ui.set_audio_level(min(1.0, lvl / 2500.0))
+                except Exception:
+                    pass
                 await asyncio.to_thread(stream.write, chunk)
         except Exception as e:
             print(f"[BRAHMA ECHO] ❌ Play: {e}")
@@ -3424,7 +4518,11 @@ def main():
         print(f"DEBUG: start_ig_daemon is {start_ig_daemon}")
         
         if start_ig_daemon:
-            from actions.instagram_chat import set_ig_prompt_callback
+            try:
+                from actions.instagram_mcp import set_ig_prompt_callback
+            except ImportError:
+                from actions.instagram_chat import set_ig_prompt_callback
+
             def _ig_handler(thread_id, username, text, is_auto):
                 if is_auto:
                     return _ig_gemini_reply(username, text)
@@ -3435,14 +4533,39 @@ def main():
                         "username": username,
                         "message": text
                     }
-                    msg = f"You have a new Instagram message from {username}. What should I reply, or should I take over the chat?"
-                    ui.write_log(f"📱 Insta ({username}): {text}")
+                    clean_text = (text or "").strip()
+                    snippet = f": '{clean_text[:75]}...'" if len(clean_text) > 75 else (f": '{clean_text}'" if clean_text else "")
+                    msg = f"You received a new Instagram message from {username}{snippet}. What should I reply, or should I take over the chat?"
+                    ui.write_log(f"📱 Insta (@{username}): {clean_text or '[Media/Attachment]'}")
                     ui.write_log(f"Brahma Echo: {msg}")
                     brahma_echo.speak(msg)
                     return None
                 
             set_ig_prompt_callback(_ig_handler)
             start_ig_daemon()
+
+        # Background Email Watcher
+        try:
+            from actions.google_workspace_mcp import (
+                start_email_daemon,
+                set_email_prompt_callback,
+                get_stored_gmail_credentials,
+            )
+            gmail_addr, gmail_pw = get_stored_gmail_credentials()
+            if gmail_addr and gmail_pw:
+                def _email_handler(sender, subject, msg_id):
+                    clean_subj = (subject or "No Subject").strip()
+                    subj_preview = f"'{clean_subj[:70]}...'" if len(clean_subj) > 70 else f"'{clean_subj}'"
+                    msg = f"You received a new email from {sender} with subject: {subj_preview}."
+                    ui.write_log(f"📧 Email ({sender}): {clean_subj}")
+                    ui.write_log(f"Brahma Echo: {msg}")
+                    brahma_echo.speak(msg)
+
+                set_email_prompt_callback(_email_handler)
+                start_email_daemon(poll_interval=25)
+                print("[Brahma Echo] Background email watcher started.")
+        except Exception as e:
+            print(f"[Brahma Echo] Email daemon initialization notice: {e}")
 
         def _clipboard_monitor():
             try:
@@ -3475,24 +4598,13 @@ def main():
         threading.Thread(target=runner, daemon=True).start()
 
     start_runner()
-    try:
-        ui.play_boot_sequence(
-            finished_callback=lambda: threading.Thread(
-                target=_speak_daily_briefing,
-                args=(ui,),
-                daemon=True,
-                name="daily-briefing",
-            ).start()
-        )
-    except Exception:
-        ui.show_main()
-        start_runner()
-        threading.Thread(
-            target=_speak_daily_briefing,
-            args=(ui,),
-            daemon=True,
-            name="daily-briefing",
-        ).start()
+    ui.show_main()
+    threading.Thread(
+        target=_speak_daily_briefing,
+        args=(ui,),
+        daemon=True,
+        name="daily-briefing",
+    ).start()
     ui.root.mainloop()
 
 
