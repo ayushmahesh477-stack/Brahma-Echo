@@ -61,7 +61,7 @@ Designed for advanced desktop productivity, Brahma Echo delivers:
 - Secure local configuration with file-based credential storage
 - Device pairing and remote routing through Brahma Connect
 
-## Features
+## Features & Complete Action Capabilities
 
 ### 🧠 The 5 Pillars of Sentient AI
 - **Conversational Realism**: Barge-in (<50ms local VAD) for instant interruption, natural Conversational Fillers, and native Hinglish fluency.
@@ -71,75 +71,103 @@ Designed for advanced desktop productivity, Brahma Echo delivers:
 - **Deep Adaptive Living Knowledge Graph**: Zero-latency heuristic auto-learning that silently extracts identity, location, email, active project paths, technical stacks, and user preferences into a persistent long-term memory graph.
 
 ### 🛡️ Autonomous Self-Healing & Continuous Self-Improvement
-
-- **Autonomous Error Localization**: Real-time traceback analysis that isolates failing lines in first-party code while strictly protecting core immune files.
+- **Autonomous Error Localization**: Real-time traceback analysis (`actions/auto_heal_engine.py`) that isolates failing lines in first-party code while strictly protecting core immune files.
 - **AST Safety Sandbox**: Candidate hotfixes are compiled in memory using Python's Abstract Syntax Tree (`ast.parse()`) and `py_compile` before touching disk.
 - **Native Google Gemini Synthesis**: Surgical hotfix generation using Gemini 2.5/2.0-Flash to fix edge cases, `KeyError`, `NoneType`, and boundary errors.
-- **Boot Sentry (Anti-Bricking Guarantee)**: Runs at startup before the UI or Gemini loads. If a recent patch caused a startup crash, it automatically rolls back from `.bak` backup.
+- **Boot Sentry (Anti-Bricking Guarantee)**: Runs at startup before the UI or Gemini loads (`core/boot_sentry.py`). If a recent patch caused a startup crash, it automatically rolls back from `.bak` backup.
 - **One-Click & Voice Rollback**: Revert any patch instantly via *"Brahma, undo last patch"* or the UI settings card.
-- **Continuous Behavioral Learning**: Permanent rule storage (`config/learned_rules.json`) dynamically injected into `_load_system_prompt()` to personalize Brahma's behavior.
+- **Continuous Behavioral Learning**: Permanent rule storage (`config/learned_rules.json`) dynamically injected into `_load_system_prompt()` via `core/learned_rules.py` to personalize Brahma's behavior without modifying source code.
+- **Live Test Sandbox**: Includes `actions/test_action.py` and `test_self_heal.py` to test the complete self-repair and rollback lifecycle safely.
 
 ### 🖥️ Local OS Hardware & System Diagnostics MCP (0 Background Credits)
-
-- **Real-Time Vitals**: Instant CPU usage, thermals, storage space, and battery health/percentage.
+- **Real-Time Vitals**: Instant CPU usage, thermals, storage space, and battery health/percentage (`actions/system_diagnostics_mcp.py`).
 - **Process & RAM Hog Scanner**: Scan and pinpoint memory/CPU-heavy applications (*"Who is eating my RAM?"*).
 - **Process Manager**: Safely terminate or force-kill frozen processes on demand (*"Kill chrome"*).
 - **Multi-Monitor Brightness**: Seamless hardware display brightness control via slider or voice (*"Dim monitor 2"*, *"Brightness 80%"*).
 
-### 📁 Smart Desktop Organizer MCP
-
-- **Automatic Desktop Cleanup**: Classifies cluttered desktop files into categorized folders (Documents, Images, Media, Archives, Installers, Code).
-- **Safety Rollback**: Full undo history allowing one-click restoration of all organized desktop files.
+### 📁 Smart Desktop Organizer & File Operations
+- **Smart Desktop Organizer MCP**: Classifies cluttered desktop files into categorized folders (Documents, Images, Media, Archives, Installers, Code) with safety rollback (`actions/desktop_organizer_mcp.py`).
+- **Deep File Controller**: Find files by name, extension, or recency, open files in default applications, move, copy, rename, and delete files (`actions/file_controller.py`).
+- **Deep File Processor**: Extract and inspect content from plain text, CSV, JSON, source code, DOCX, PDF, and image OCR (`actions/file_processor.py`).
 
 ### 🌐 Google Workspace MCP (Gmail, Calendar, Drive)
-
-- **Gmail Integration**: Read unread emails, search inbox, and send emails directly through voice or chat.
+- **Gmail Integration**: Read unread emails, search inbox, and send emails directly through voice or chat (`actions/google_workspace_mcp.py`).
 - **Google Calendar**: Schedule meetings, check daily agenda, and get reminders.
 - **Google Drive**: Search documents, read remote files, and upload local deliverables.
 
 ### 🌐 Full Browser Automation MCP (@playwright/mcp)
-
-- **Official Model Context Protocol Integration**: Directly interfaces with Microsoft's `@playwright/mcp` server over stdio JSON-RPC 2.0.
+- **Official Model Context Protocol Integration**: Directly interfaces with Microsoft's `@playwright/mcp` server over stdio JSON-RPC 2.0 (`actions/playwright_mcp_client.py`, `actions/browser_control.py`).
 - **24+ High-Level Browser Actions**: Full automation lifecycle including `browser_navigate`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_snapshot`, `browser_screenshot`, `browser_evaluate`, and `browser_tabs`.
 - **Accessibility Tree Navigation**: Extracts structural accessibility trees instead of fragile pixel coordinates for robust, resilient interaction across dynamic web apps.
 - **Persistent Profile & Authentication**: Automatically manages session storage in `LOCALAPPDATA/BrahmaAI/PlaywrightProfile`, enabling persistent logins and headless/headed modes.
 
-### Intelligent Assistant
+### 📱 Brahma Connect & Android Remote Autopilot
+- **Local Network Pairing & Discovery**: Connects Android companion devices securely over local Wi-Fi with cryptographic pairing tokens (`actions/brahma_connect.py`).
+- **Device Telemetry & Controls**: Query phone battery status, trigger flashlight, adjust media/call volume, fetch Wi-Fi state, and launch phone apps.
+- **Mobile Autopilot**: Remote device control using Android's native Accessibility Service to click, scroll, type, and automate actions on mobile (`actions/mobile_autopilot.py`).
+- **Clipboard & Notification Sync**: Seamlessly sync copied text and alerts between Windows and your phone.
 
-- Unified voice and typed command handling
-- Wake-word listening and responsive assistant activation
-- Dynamic screen inspection for context-aware answers
-- **Unified Gemini Native Voice** for all system alerts and daily briefings
-- **True Interruption (Barge-in)** with dynamic noise-gating
-- **Proactive Engine** for spontaneous, context-aware interaction when idle
-- Gemini-first AI with OpenRouter fallback resilience
+### 📸 Vision, Screen & Attention Intelligence
+- **Dynamic Screen Processor**: Real-time screenshot capture, visual question answering, active window understanding, and OCR (`actions/screen_processor.py`).
+- **Focus & Attention Monitor**: Camera-based focus tracker that monitors user gaze, eye contact, drowsiness, and posture with automated break alerts (`actions/attention_monitor.py`).
+- **Offline Face Detection**: Fast, zero-credit face landmark and presence verification powered by Haar cascades (`core/haarcascade_frontalface_default.xml`).
 
-### Productivity & Automation
+### 🏋️ AI Fitness, Workout & Nutrition Tracker
+- **Computer-Vision Pushup Counter**: Live webcam rep counter with form detection, rep feedback, and workout session logging (`actions/pushup_counter.py`).
+- **Intelligent Calorie & Nutrition Counter**: Log meals, calculate daily caloric budgets, track macronutrients (proteins, carbs, fats), and estimate calories from food descriptions or images (`actions/calorie_counter.py`).
 
-- **System Health & Resource Manager** to monitor CPU/RAM and forcefully close frozen apps
-- **Background Monitors & Alerts** for polling crypto prices, website uptime, or memory spikes autonomously
-- **Smart Clipboard Analyzer** to instantly read and process copied text natively
-- Open and control Windows apps, windows, files, and system actions
-- Browser automation with Playwright-driven workflows
-- Contextual automation based on screen content and notifications
-- **Instagram AI Assistant** to poll DMs, notify you, and seamlessly take over chats or reply on your behalf
-- Reminder, meeting assistance, and notification management
+### 📊 Office, Presentations & Document Engineering
+- **Automated Presentation Builder**: Generates multi-slide PowerPoint `.pptx` decks complete with structured layouts, styling, diagrams, and speaker notes (`actions/ppt_template_workflow.py`).
+- **Word Document Generator**: Creates and edits `.docx` documents with rich typography, bullet points, headers, tables, and formatted sections (`actions/docx_tools.py`).
+- **Comprehensive PDF Tools**: Merge PDFs, split pages, convert documents to PDF, and extract text/tables with OCR (`actions/pdf_tools.py`).
+- **Spreadsheet & Office Builder**: Generates Excel spreadsheets `.xlsx` with calculated formulas and formatted reports (`actions/office_builder.py`, `actions/office_generator.py`).
 
-### Content & Office Tools
+### 💻 Autonomous Developer & Code Engineering
+- **Brahma Dev Agent**: Multi-step coding agent that reads repository code, authors files, runs scripts, and iterates on software tasks (`actions/brahma_dev_agent.py`, `actions/dev_agent.py`).
+- **Code Helper**: Debugs code syntax errors, writes algorithms, explains complex codebases, and refactors functions (`actions/code_helper.py`).
+- **Claude Code CLI Bridge**: Interoperability bridge to spawn and orchestrate Anthropic's Claude Code CLI tasks directly from Brahma (`actions/claude_code_bridge.py`).
 
-- Generate presentation decks, summaries, and slide content
-- Create Word documents and spreadsheets from prompts
-- Export polished reports and deliverables as PDF
-- Build landing pages and website workspaces locally
+### 💬 Social Media & Messaging Bridges
+- **Instagram AI Assistant**: Reads Instagram direct messages, sends alerts for incoming chats, and auto-replies conversationally using AI (`actions/instagram_mcp.py`, `actions/instagram_chat.py`).
+- **WhatsApp & Messaging**: Dispatches automated messages via WhatsApp web/native automation and SMS protocols (`actions/send_message.py`).
+- **Social Video Uploader**: Automates video publishing and uploading flows (`actions/upload_video.py`).
 
-### Integrations
+### 🎵 Media, Spotify & Entertainment
+- **Spotify Music Controller**: Full Spotify desktop integration to play, pause, skip, rewind, adjust playback volume, and search playlists/tracks (*"Play my chill playlist"* - `actions/spotify_controller.py`).
+- **YouTube Playback & Summarization**: Search YouTube, open videos, extract transcripts, and generate instant video summaries (`actions/youtube_video.py`).
+- **Game Launcher & Updater**: Detects installed games (Steam, Epic, Riot), checks patch status, optimizes system focus, and launches titles (*"Launch Valorant"* - `actions/game_updater.py`).
 
-- Google Workspace MCP (Gmail, Calendar, Drive)
-- Instagram DM bridge for reading and auto-replying to messages natively
-- Discord bridge for remote commands and collaboration
-- OpenRouter fallback for uninterrupted AI access
-- Configurable voice, UI, startup, and notification settings
-- Brahma Connect for device discovery and command routing
+### 📅 Productivity, Meetings & Daily Briefings
+- **Personal Daily Briefing**: Comprehensive morning audio report combining local weather, daily calendar meetings, unread emails, and news highlights (`actions/daily_briefing.py`).
+- **AI Meeting Assistant**: Real-time meeting listener that captures audio, transcribes discussions, and produces formatted action items and summaries (`actions/meeting_assistant.py`).
+- **Calendar & Scheduler**: Create, inspect, and update calendar appointments and alarms (`actions/calendar_scheduler.py`).
+- **Smart Reminders**: Timed reminders, countdown timers, and recurring notifications (*"Remind me in 20 minutes to stretch"* - `actions/reminder.py`).
+
+### ⚙️ Windows System Control & Direct Desktop Automation
+- **System Power Manager**: Voice and automated commands for Windows sleep, shutdown, reboot, lock screen, and hibernate (`actions/system_manager.py`).
+- **Application Launcher & Switcher**: Opens any installed Windows app, system utility, or web shortcut (`actions/open_app.py`, `actions/desktop.py`).
+- **Direct Computer Control**: Hardware-level mouse click, cursor movement, keyboard typing, drag-and-drop, and hotkey execution (`actions/computer_control.py`).
+- **Windows System Settings**: Adjust system master volume, mute/unmute, toggle Wi-Fi, toggle Bluetooth, and manage display configurations (`actions/computer_settings.py`).
+- **Device Screen Wake & Unlock**: Wakes display and unlocks device screens (`actions/unlock_device.py`).
+
+### 🔍 Live Web Intelligence, Search & Travel
+- **Real-Time Web Search**: Instant web queries and cited answers powered by live search engines (`actions/web_search.py`).
+- **Flight Finder & Travel Scout**: Searches flights, checks departure/arrival routes, and compares ticket options (`actions/flight_finder.py`).
+- **Live Weather Forecasts**: Precise meteorological reports, temperature, precipitation, humidity, and multi-day forecasts for any city or current geolocation (`actions/weather_report.py`, `core/device_location.py`).
+
+### 📈 Proactive Sentries & Background Monitors
+- **Autonomous Background Watchers**: Monitors cryptocurrency prices, tracks website uptime, and detects system RAM spikes in the background (`actions/background_monitor.py`).
+- **Proactive AI Engine**: Detects user idle periods to provide non-intrusive reminders, hydration alerts, and posture check-ins (`actions/proactive.py`).
+- **Smart Clipboard Sentry**: Live clipboard listener that detects copied URLs, code blocks, or text and offers instant contextual actions (`core/clipboard_sentry.py`).
+- **Foreground Window Context**: Dynamically detects the active foreground app and window title to contextualize AI responses (`core/window_context.py`).
+
+### 🎨 Core UI & Acoustic Infrastructure
+- **Cinematic Floating Launcher**: Modern Qt interface featuring 3D cursor gaze tracking, audio visualizer, edge snapping, and theme customization (`ui.py`).
+- **Voice Pipeline & Interruption**: Ultra-low-latency voice activation, Gemini native voice synthesis, and true barge-in interruption (<50ms VAD) (`core/echo.py`).
+- **Global Hotkey Summon**: Windows-wide keyboard shortcut to summon Brahma instantly from any application (`core/hotkey.py`).
+- **Spatial Acoustic Sound Manager**: High-fidelity sound effects for listening cues, deployment whooshes, telemetry chirps, and mission completion (`sound_manager.py`).
+- **Safety Confirmations & Undo Framework**: Built-in confirmation guards for sensitive/destructive operations with undo support (`core/confirm.py`, `core/undo.py`).
+
 
 ## Getting Started
 
@@ -227,37 +255,108 @@ Core configuration files:
 
 ## Project Structure
 
-- `main.py` — application startup, AI orchestration, Boot Sentry check, and command routing
-- `ui.py` — Qt-based desktop interface, live assistant controls, and System & Connectivity settings
+- `main.py` — application startup, AI orchestration, Boot Sentry validation, and multimodal event loop
+- `ui.py` — cinematic Qt desktop interface, 3D cursor gaze, audio visualizer, and hardware telemetry dashboard
+- `test_self_heal.py` — automated headless test runner for self-healing and continuous learning verification
+- `sound_manager.py` — spatial acoustic audio engine for tactile UI sound cues and alerts
 - `core/boot_sentry.py` — startup crash detection and automatic unbrick recovery sentry
 - `core/learned_rules.py` — persistent learned rules manager and dynamic prompt injection engine
+- `core/echo.py` — voice pipeline, wake-word activation, Gemini native audio, and <50ms barge-in
+- `core/window_context.py` — active foreground window inspector for contextual awareness
+- `core/clipboard_sentry.py` — background clipboard monitor for rapid link and code processing
+- `core/audio_devices.py` — WASAPI microphone and speaker device configuration
+- `core/hotkey.py` — Windows-wide global hotkey listener
+- `core/confirm.py` & `core/undo.py` — safety confirmation dialogs and global rollback engine
 - `actions/auto_heal_engine.py` — autonomous traceback analyzer, in-memory AST sandbox, and Gemini hotfix engine
 - `actions/system_diagnostics_mcp.py` — 0-credit local OS hardware telemetry, RAM hogs, display brightness, and process termination
 - `actions/desktop_organizer_mcp.py` — automated desktop decluttering with safe rollback
 - `actions/google_workspace_mcp.py` — native Gmail, Google Calendar, and Drive integration
-- `actions/playwright_mcp_client.py` — Microsoft @playwright/mcp client for 24+ browser automation actions
-- `actions/` — modular automation, document, and assistant tools
+- `actions/playwright_mcp_client.py` & `actions/browser_control.py` — Microsoft @playwright/mcp client for 24+ browser automation actions
+- `actions/brahma_connect.py` & `actions/mobile_autopilot.py` — Android companion app gateway and remote mobile autopilot
+- `actions/screen_processor.py` — dynamic screenshot capture, active window inspection, and visual QA
+- `actions/attention_monitor.py` — camera-based attention tracking, eye contact, drowsiness, and posture alerts
+- `actions/pushup_counter.py` — computer-vision pushup and workout rep counter with live form feedback
+- `actions/calorie_counter.py` — nutrition tracker, meal logging, and caloric budget calculator
+- `actions/ppt_template_workflow.py` — PowerPoint presentation deck generator with custom slide layouts
+- `actions/docx_tools.py` — Microsoft Word `.docx` generator and editor
+- `actions/pdf_tools.py` — PDF merger, splitter, converter, and OCR text/table extractor
+- `actions/office_builder.py` & `actions/office_generator.py` — Excel spreadsheet `.xlsx` and office document generator
+- `actions/brahma_dev_agent.py` & `actions/dev_agent.py` — autonomous software engineering and debugging agent
+- `actions/code_helper.py` — code syntax debugger, algorithm generator, and refactoring assistant
+- `actions/claude_code_bridge.py` — Claude Code CLI execution bridge
+- `actions/instagram_mcp.py` & `actions/instagram_chat.py` — Instagram DM monitor and autonomous AI chat responder
+- `actions/send_message.py` — WhatsApp web/native automation and messaging dispatcher
+- `actions/upload_video.py` — social video publishing automation
+- `actions/spotify_controller.py` — Spotify playback, playlist search, and volume control
+- `actions/youtube_video.py` — YouTube video search, playback, and transcript summarizer
+- `actions/game_updater.py` — Steam/Epic/Riot game launcher and patch checker
+- `actions/daily_briefing.py` — morning audio briefing (weather, agenda, emails, news highlights)
+- `actions/meeting_assistant.py` — live meeting listener, transcriber, and action item extractor
+- `actions/calendar_scheduler.py` — calendar appointment and event scheduler
+- `actions/reminder.py` — voice timers, countdowns, and recurring reminders
+- `actions/file_controller.py` — deep Windows file search, open, move, copy, rename, and delete
+- `actions/file_processor.py` — content extraction from text, CSV, JSON, code, docx, pdf, and images
+- `actions/computer_control.py` — direct mouse clicks, cursor movement, typing, and hotkeys
+- `actions/computer_settings.py` — system volume, Wi-Fi, Bluetooth, and display controls
+- `actions/system_manager.py` — Windows sleep, shutdown, restart, and lock controls
+- `actions/open_app.py` & `actions/desktop.py` — launch apps, switch windows, and manage desktop
+- `actions/web_search.py` — live web searches with cited summaries
+- `actions/flight_finder.py` — flight route search and price estimates
+- `actions/weather_report.py` — real-time local and global weather forecasts
+- `actions/background_monitor.py` — autonomous crypto price, uptime, and RAM monitors
+- `actions/proactive.py` — spontaneous idle suggestions and wellness alerts
 - `brahma_connect/` — local gateway, pairing, and remote routing
 - `config/` — local settings, credentials, learned rules, and backups
 - `plugins/` — optional plugin extensions
-- `tests/` — integration and validation tests
 
 ## 🎙️ Command Quick Reference
 
-| Action | Voice / Text Command | Description |
+| Category | Voice / Text Command | Action / Capability |
 |---|---|---|
-| **Simulate Bug** | *"Trigger test bug"* | Triggers safe test error in `actions/test_action.py` to test self-healing |
-| **Fix Bug** | *"Brahma, fix that bug"* | Analyzes last traceback, synthesizes AST hotfix via Gemini, and patches |
-| **Undo Patch** | *"Brahma, undo last patch"* | Restores modified file from atomic `.bak` backup |
-| **Patch Log** | *"Show patch history"* | Displays recent hotfixes, target files, and status |
-| **Learn Rule** | *"Remember to always [preference]"* | Permanently saves directive into system prompt |
-| **Show Rules** | *"Show learned rules"* | Lists all active behavioral directives |
-| **RAM Hogs** | *"What's eating my RAM?"* | Pinpoints top memory-consuming applications |
-| **Battery** | *"Check battery status"* | Reports battery health, percent, and power state |
-| **Kill Process** | *"Kill chrome"* | Safely terminates frozen applications |
-| **Brightness** | *"Dim screen 20%"* / *"Set brightness 80"* | Adjusts multi-monitor display brightness |
-| **Clean Desktop** | *"Organize my desktop"* | Sorts desktop clutter into categorized folders |
-| **Browser Action** | *"Go to github.com and click explore"* | Automated browsing, clicking, and form-filling via Playwright MCP |
+| **Autonomous Self-Healing** | *"Trigger test bug"* | Triggers safe simulated error in `actions/test_action.py` |
+| **Autonomous Self-Healing** | *"Brahma, fix that bug"* | Synthesizes Gemini hotfix, runs AST verification, and patches code |
+| **Autonomous Self-Healing** | *"Brahma, undo last patch"* | Restores modified file from atomic `.bak` backup |
+| **Autonomous Self-Healing** | *"Show patch history"* | Displays recent hotfixes, target files, and status |
+| **Continuous Learning** | *"Remember to always [rule]"* | Permanently commits behavioral directive into system prompt |
+| **Continuous Learning** | *"Show learned rules"* | Lists all active behavioral directives in memory |
+| **Hardware & Diagnostics** | *"What's eating my RAM?"* | Pinpoints top memory-consuming applications |
+| **Hardware & Diagnostics** | *"Check battery status"* | Reports battery health, percent, and power state |
+| **Hardware & Diagnostics** | *"Kill chrome"* | Safely terminates frozen or high-resource applications |
+| **Hardware & Diagnostics** | *"Dim screen 20%"* / *"Set brightness 80"* | Adjusts multi-monitor display brightness |
+| **Desktop & Files** | *"Organize my desktop"* | Classifies desktop clutter into categorized folders |
+| **Desktop & Files** | *"Find file budget.xlsx"* | Searches disk and opens requested file |
+| **Desktop & Files** | *"Open downloads folder"* | Navigates directly to requested directory |
+| **Browser Automation** | *"Go to github.com and click explore"* | Automated browsing, clicking, and form-filling via Playwright MCP |
+| **Google Workspace** | *"Read my unread emails"* | Retrieves and summarizes latest Gmail inbox messages |
+| **Google Workspace** | *"What is my schedule today?"* | Reads today's agenda from Google Calendar |
+| **Google Workspace** | *"Search Google Drive for quarterly deck"* | Finds documents stored on Google Drive |
+| **Android Phone Control** | *"Check phone battery"* | Fetches live phone battery status via Brahma Connect |
+| **Android Phone Control** | *"Turn on phone flashlight"* | Triggers mobile hardware flashlight remotely |
+| **Android Phone Control** | *"Launch YouTube on phone"* | Remotely opens app via mobile autopilot |
+| **Office & Documents** | *"Create a presentation on AI Agents"* | Builds a formatted multi-slide PowerPoint `.pptx` deck |
+| **Office & Documents** | *"Generate a Word report for Sprint 4"* | Creates a styled `.docx` document with tables and headers |
+| **Office & Documents** | *"Merge these two PDF files"* | Combines multiple PDFs into a single file |
+| **Office & Documents** | *"Build a spreadsheet for monthly expenses"* | Creates a `.xlsx` spreadsheet with calculated sum formulas |
+| **Coding & Dev Agent** | *"Debug this Python script"* | Pinpoints syntax and logic errors with code solutions |
+| **Coding & Dev Agent** | *"Build a simple REST API in FastAPI"* | Autonomous developer agent creates and tests project files |
+| **Social & Messaging** | *"Check my Instagram DMs"* | Reads new direct messages and suggests replies |
+| **Social & Messaging** | *"Send WhatsApp message to Alex"* | Dispatches message via WhatsApp automation |
+| **Media & Music** | *"Play my chill playlist on Spotify"* | Searches and starts Spotify playback |
+| **Media & Music** | *"Pause music"* / *"Next track"* | Controls Spotify media playback |
+| **Media & Music** | *"Search YouTube for Lo-Fi beats"* | Launches and plays video on YouTube |
+| **Media & Music** | *"Launch Valorant"* | Checks patch status and launches game |
+| **Vision & Screen** | *"What's on my screen?"* | Analyzes active screen content and provides context |
+| **Vision & Screen** | *"Start posture monitor"* | Monitors webcam for slouching and eye fatigue |
+| **Fitness & Nutrition** | *"Start pushup counter"* | Uses webcam vision to count workout reps with live form audio |
+| **Fitness & Nutrition** | *"Log 450 calories for grilled chicken"* | Logs meal and updates daily macro totals |
+| **Productivity & Routine** | *"Good morning Brahma"* / *"Daily briefing"* | Delivers spoken morning brief (weather, meetings, news) |
+| **Productivity & Routine** | *"Start meeting assistant"* | Listens, transcribes, and formats meeting action items |
+| **Productivity & Routine** | *"Remind me in 25 minutes to take a break"* | Schedules audio and visual countdown reminder |
+| **Windows Control** | *"Lock my computer"* | Immediately locks the Windows workstation |
+| **Windows Control** | *"Mute system volume"* | Toggles master system audio |
+| **Windows Control** | *"Turn off Wi-Fi"* / *"Toggle Bluetooth"* | Toggles Windows hardware connectivity |
+| **Travel & Scout** | *"Find flights from New York to London"* | Searches routes and estimated airline pricing |
+| **Travel & Scout** | *"What is the weather in Paris tomorrow?"* | Reports meteorological forecast and temperatures |
 
 ## Plugin System
 
