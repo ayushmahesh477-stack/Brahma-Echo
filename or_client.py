@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 import json
 import sys
 import time
@@ -18,7 +19,7 @@ def _get_base_dir() -> Path:
 
 
 BASE_DIR     = _get_base_dir()
-API_KEY_PATH = BASE_DIR / "config" / "api_keys.json"
+API_KEY_PATH = get_user_data_dir() / "config" / "api_keys.json"
 
 def _load_api_key() -> str:
     try:
@@ -375,8 +376,8 @@ if __name__ == "__main__":
     try:
         history = [
             {"role": "system",    "content": "You are a helpful assistant. Be brief."},
-            {"role": "user",      "content": "My name is Suryaansh."},
-            {"role": "assistant", "content": "Hello Suryaansh, how can I help you?"},
+            {"role": "user",      "content": "My name is User."},
+            {"role": "assistant", "content": "Hello User, how can I help you?"},
             {"role": "user",      "content": "What is my name?"},
         ]
         reply = client.multi_turn(history)

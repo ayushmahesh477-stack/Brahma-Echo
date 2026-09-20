@@ -385,6 +385,6 @@ This project is published under a custom source-available license. See `LICENSE`
 
 ## Maintainer
 
-- Suryaansh Tiwari
+- User
 
 > Preserve attribution and keep credentials secure when building on top of Brahma Echo.

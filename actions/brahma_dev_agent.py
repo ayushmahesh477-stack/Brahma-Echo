@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 import os
 import re
 import sys
@@ -17,8 +18,8 @@ def get_base_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 BASE_DIR = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
-SETTINGS_PATH = BASE_DIR / "config" / "app_settings.json"
+API_CONFIG_PATH = get_user_data_dir() / "config" / "api_keys.json"
+SETTINGS_PATH = get_user_data_dir() / "config" / "app_settings.json"
 
 # ==============================================================================
 # NATIVE CLAUDE-CODE TOOLS (REBRANDED FOR BRAHMA DEV)

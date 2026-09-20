@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.user_paths import get_user_data_dir
 
 import asyncio
 import json
@@ -55,7 +56,7 @@ def _base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 BASE_DIR   = _base_dir()
-CONFIG_DIR = BASE_DIR / "config"
+CONFIG_DIR = get_user_data_dir() / "config"
 API_FILE   = CONFIG_DIR / "api_keys.json"
 APP_SETTINGS_FILE = CONFIG_DIR / "app_settings.json"
 DISCORD_SETTINGS_FILE = CONFIG_DIR / "discord_bot.json"
@@ -12143,7 +12144,7 @@ class SystemConnectivityPage(QWidget):
                 "$Shortcut.Save()",
             ])
             
-            ps1_path = base_dir / "config" / "create_desktop_shortcut.ps1"
+            ps1_path = get_user_data_dir() / "config" / "create_desktop_shortcut.ps1"
             ps1_path.write_text(ps1_script, encoding="utf-8")
             
             subprocess.run(
@@ -12154,7 +12155,7 @@ class SystemConnectivityPage(QWidget):
             )
             
             # Write marker file
-            marker_path = base_dir / "config" / ".desktop_shortcut_created"
+            marker_path = get_user_data_dir() / "config" / ".desktop_shortcut_created"
             marker_path.write_text("created", encoding="utf-8")
             
             return True, str(shortcut_path)

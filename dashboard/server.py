@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 """
 dashboard/server.py — Brahma Local HTTP Dashboard
 
@@ -82,7 +83,7 @@ def _quiet_run(*args, **kwargs):
 def _get_gemini_key() -> str | None:
     try:
         import json as _json
-        with open(BASE_DIR / "config" / "api_keys.json", "r", encoding="utf-8") as f:
+        with open(get_user_data_dir() / "config" / "api_keys.json", "r", encoding="utf-8") as f:
             return _json.load(f).get("gemini_api_key")
     except Exception:
         return None
@@ -444,7 +445,7 @@ def _read(name: str) -> str:
 
 def _ensure_ssl_certs() -> bool:
     """Create local self-signed certs when missing so phones can use HTTPS."""
-    certs = BASE_DIR / "config" / "certs"
+    certs = get_user_data_dir() / "config" / "certs"
     key_path = certs / "brahma.key"
     cert_path = certs / "brahma.crt"
     if key_path.exists() and cert_path.exists():
@@ -884,8 +885,8 @@ class DashboardServer:
     # ── serve ─────────────────────────────────────────────────────────────
     async def _serve_alias(self) -> None:
         """Legacy HTTPS alias server kept for compatibility, but not used for QR pairing."""
-        ssl_key  = BASE_DIR / "config" / "certs" / "brahma.key"
-        ssl_cert = BASE_DIR / "config" / "certs" / "brahma.crt"
+        ssl_key  = get_user_data_dir() / "config" / "certs" / "brahma.key"
+        ssl_cert = get_user_data_dir() / "config" / "certs" / "brahma.crt"
         asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT + 1)
         cfg = uvicorn.Config(
             self.app, host="0.0.0.0", port=PORT + 1, log_level="warning",

@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 # actions/desktop_organizer_mcp.py
 """
 Smart Desktop & Downloads Organizer MCP for Brahma AI.
@@ -20,7 +21,7 @@ logger = logging.getLogger("SmartOrganizerMCP")
 # ── Paths & Config ──────────────────────────────────────────────────────────
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-CONFIG_DIR = BASE_DIR / "config"
+CONFIG_DIR = get_user_data_dir() / "config"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 HISTORY_FILE = CONFIG_DIR / "organizer_history.json"
 

@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 from core import undo as undo_stack
 from core import audio_devices
 from core.echo import EchoGuard
@@ -96,7 +97,7 @@ def get_base_dir():
 
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
+API_CONFIG_PATH = get_user_data_dir() / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
 STARTUP_LOG     = Path(os.environ.get("LOCALAPPDATA", str(BASE_DIR))) / "Brahma Echo" / "startup.log"
 LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-preview-12-2025"
@@ -131,7 +132,7 @@ def _ensure_desktop_shortcut() -> None:
     if os.name != "nt":
         return
 
-    marker_path = BASE_DIR / "config" / ".desktop_shortcut_created"
+    marker_path = get_user_data_dir() / "config" / ".desktop_shortcut_created"
     if marker_path.exists():
         return
 
@@ -171,7 +172,7 @@ def _ensure_desktop_shortcut() -> None:
             return value.replace("'", "''")
 
         icon_value = str(icon_path) if icon_path and icon_path.exists() else ""
-        ps1_path = BASE_DIR / "config" / "create_desktop_shortcut.ps1"
+        ps1_path = get_user_data_dir() / "config" / "create_desktop_shortcut.ps1"
         ps1_script = "\n".join([
             "$WshShell = New-Object -ComObject WScript.Shell",
             f"$Shortcut = $WshShell.CreateShortcut('{_ps_escape(str(shortcut_path))}')",
@@ -254,12 +255,10 @@ def _speak_daily_briefing(ui=None) -> None:
         return
     try:
         from actions.daily_briefing import compile_unified_briefing
-        from actions.attention_monitor import speak_native
         data, narrative = compile_unified_briefing()
         if ui:
             ui.show_daily_briefing(data)
             ui.write_log(f"Brahma Echo: {narrative}")
-        speak_native(narrative)
     except Exception as e:
         print(f"[DailyBriefing] Error: {e}")
     
@@ -1540,7 +1539,7 @@ TOOL_DECLARATIONS = [
                     )
                 },
                 "key":   {"type": "STRING", "description": "Short snake_case key (e.g. name, favorite_food, sister_name)"},
-                "value": {"type": "STRING", "description": "Concise value in English (e.g. Suryaansh, pizza, older sister)"},
+                "value": {"type": "STRING", "description": "Concise value in English (e.g. User, pizza, older sister)"},
             },
             "required": ["category", "key", "value"]
         }
@@ -4609,7 +4608,31 @@ def main():
 
 
 if __name__ == "__main__":
+    import sys
+    import os
     import traceback
+
+    # Intercept subprocess calls when running as PyInstaller .exe
+    if len(sys.argv) >= 2:
+        if sys.argv[1].endswith(".py") and os.path.exists(sys.argv[1]):
+            # AgentExecutor is trying to run a dynamic script
+            try:
+                with open(sys.argv[1], 'r', encoding='utf-8') as f:
+                    code = f.read()
+                namespace = {"__name__": "__main__", "__file__": sys.argv[1]}
+                exec(code, namespace)
+                sys.exit(0)
+            except Exception as e:
+                traceback.print_exc()
+                sys.exit(1)
+        elif sys.argv[1] == "-m" and len(sys.argv) >= 3 and sys.argv[2] == "pip":
+            try:
+                from pip._internal.cli.main import main as pip_main
+                sys.exit(pip_main(sys.argv[3:]))
+            except ImportError:
+                print("pip is not available in the compiled executable.")
+                sys.exit(1)
+
     try:
         main()
     except Exception as e:

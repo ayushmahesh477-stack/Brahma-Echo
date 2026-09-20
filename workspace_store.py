@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.user_paths import get_user_data_dir
 
 import json
 import os
@@ -18,7 +19,7 @@ def _base_dir() -> Path:
 
 
 BASE_DIR = _base_dir()
-CONFIG_DIR = BASE_DIR / "config"
+CONFIG_DIR = get_user_data_dir() / "config"
 STORE_FILE = CONFIG_DIR / "workspace_store.sqlite3"
 
 
@@ -247,7 +248,7 @@ class WorkspaceStore:
             try:
                 from google import genai
                 base_dir = Path(__file__).resolve().parent
-                key_path = base_dir / "config" / "api_keys.json"
+                key_path = get_user_data_dir() / "config" / "api_keys.json"
                 with open(key_path, "r", encoding="utf-8") as f:
                     api_key = json.load(f)["gemini_api_key"]
                 

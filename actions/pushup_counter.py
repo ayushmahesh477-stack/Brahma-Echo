@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 """
 Brahma AI — Workout & Exercise Tracker.
 
@@ -81,7 +82,7 @@ _CALORIES_PER_REP = {
 
 def _get_camera_index() -> int:
     try:
-        cfg = json.loads((BASE_DIR / "config" / "app_settings.json").read_text(encoding="utf-8"))
+        cfg = json.loads((get_user_data_dir() / "config" / "app_settings.json").read_text(encoding="utf-8"))
         return int(cfg.get("camera_index", 0))
     except Exception:
         return 0
@@ -256,7 +257,7 @@ def _record_session(exercise: str, reps: int, seconds: float, calories: float) -
         "calories_burned": round(calories, 1),
     }
     try:
-        m_dir = BASE_DIR / "memory"
+        m_dir = get_user_data_dir() / "memory"
         m_dir.mkdir(parents=True, exist_ok=True)
         w_file = m_dir / "workout_history.json"
         history = []

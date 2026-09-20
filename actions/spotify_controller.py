@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 # actions/spotify_controller.py
 """
 Universal Music & Spotify Controller for Brahma AI.
@@ -19,7 +20,7 @@ import urllib.parse
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
+API_CONFIG_PATH = get_user_data_dir() / "config" / "api_keys.json"
 
 PLUGIN = {
     "name": "spotify_controller",

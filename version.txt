@@ -14,11 +14,11 @@ VSVersionInfo(
       [
       StringTable(
         '040904B0',
-        [StringStruct('CompanyName', 'Suryaansh Tiwari'),
+        [StringStruct('CompanyName', 'User'),
         StringStruct('FileDescription', 'Brahma Echo AI Assistant'),
         StringStruct('FileVersion', '1.0.0'),
         StringStruct('InternalName', 'BrahmaEcho'),
-        StringStruct('LegalCopyright', '© Suryaansh Tiwari. All rights reserved.'),
+        StringStruct('LegalCopyright', '© User. All rights reserved.'),
         StringStruct('OriginalFilename', 'BrahmaEcho.exe'),
         StringStruct('ProductName', 'Brahma Echo'),
         StringStruct('ProductVersion', '1.0.0')])

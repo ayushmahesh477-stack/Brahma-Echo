@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 """
 Brahma AI — Calorie & Nutrition Vision Engine.
 
@@ -60,8 +61,8 @@ PLUGIN = {
 
 def _get_api_config() -> dict:
     for cfg_path in [
-        BASE_DIR / "config" / "api_keys.json",
-        BASE_DIR / "config" / "app_settings.json",
+        get_user_data_dir() / "config" / "api_keys.json",
+        get_user_data_dir() / "config" / "app_settings.json",
     ]:
         if cfg_path.exists():
             try:
@@ -217,7 +218,7 @@ def _analyze_food_multimodal(image_b64: Optional[str], query: str) -> dict:
 def _save_nutrition_log(entry: dict) -> None:
     """Appends meal entry to memory/nutrition_log.json."""
     try:
-        log_dir = BASE_DIR / "memory"
+        log_dir = get_user_data_dir() / "memory"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "nutrition_log.json"
         history = []

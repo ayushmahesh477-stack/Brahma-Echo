@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.user_paths import get_user_data_dir
 
 import json
 import os
@@ -17,7 +18,7 @@ def _base_dir() -> Path:
 
 
 BASE_DIR = _base_dir()
-CONFIG_DIR = BASE_DIR / "config"
+CONFIG_DIR = get_user_data_dir() / "config"
 DB_FILE = CONFIG_DIR / "smart_home.sqlite3"
 KEY_FILE = CONFIG_DIR / "smart_home.key"
 

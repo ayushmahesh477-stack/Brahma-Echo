@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.user_paths import get_user_data_dir
 
 import json
 import re
@@ -23,7 +24,7 @@ def get_base_dir() -> Path:
 
 
 BASE_DIR         = get_base_dir()
-MEMORY_PATH      = BASE_DIR / "memory" / "long_term.json"
+MEMORY_PATH      = get_user_data_dir() / "memory" / "long_term.json"
 _lock            = Lock()
 MAX_VALUE_LENGTH = 380
 
@@ -229,7 +230,7 @@ def extract_memory(user_text: str, brahma_text: str, api_key: str = "") -> dict:
             f"- Skip: weather, reminders, search results, one-time commands.\n"
             f"- Use concise English values regardless of conversation language.\n\n"
             f"Format:\n"
-            f'{{"identity":{{"name":{{"value":"Suryaansh"}}}},\n'
+            f'{{"identity":{{"name":{{"value":"User"}}}},\n'
             f' "preferences":{{"favorite_color":{{"value":"blue"}}}},\n'
             f' "projects":{{"brahma_ai":{{"value":"Brahma AI - Lite assistant"}}}},\n'
             f' "relationships":{{"friend_alex":{{"value":"close friend"}}}},\n'
@@ -571,7 +572,7 @@ def pop_last_session() -> dict | None:
             return None
 
 # ── Chat History ──────────────────────────────────────────────────────────────
-CHAT_HISTORY_PATH = BASE_DIR / "memory" / "chat_history.json"
+CHAT_HISTORY_PATH = get_user_data_dir() / "memory" / "chat_history.json"
 MAX_HISTORY_LENGTH = 40
 
 def load_chat_history() -> list[dict]:

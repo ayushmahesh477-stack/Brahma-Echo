@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 import asyncio
 import base64
 import io
@@ -29,7 +30,7 @@ def get_base_dir():
     return Path(__file__).resolve().parent.parent
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
+API_CONFIG_PATH = get_user_data_dir() / "config" / "api_keys.json"
 
 LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 CHANNELS            = 1
@@ -44,7 +45,7 @@ SYSTEM_PROMPT = (
     "You are Brahma AI - Lite, an open-source assistant. "
     "Analyze images with technical precision and intelligence. "
     "Help the user in a way they can understand — don't be overly complex. "
-    "Be concise, smart, and helpful like Brahma AI, personal assistant to Suryaansh. "
+    "Be concise, smart, and helpful like Brahma AI, personal assistant to User. "
     "Respond in maximum 2 short sentences. Speed is priority. "
     "Address the user as 'sir' for a tone of respect. "
     "Ask if the user needs any further help with their problem."

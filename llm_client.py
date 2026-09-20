@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 import json
 import logging
 import requests
@@ -14,7 +15,7 @@ def _get_base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 BASE_DIR = _get_base_dir()
-SETTINGS_PATH = BASE_DIR / "config" / "app_settings.json"
+SETTINGS_PATH = get_user_data_dir() / "config" / "app_settings.json"
 
 class UnifiedAIClient:
     def __init__(self):

@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 import json
 import re
 import sys
@@ -12,7 +13,7 @@ def get_base_dir() -> Path:
 
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
+API_CONFIG_PATH = get_user_data_dir() / "config" / "api_keys.json"
 
 
 class ErrorDecision(Enum):

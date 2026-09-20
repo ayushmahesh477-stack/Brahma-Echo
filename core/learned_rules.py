@@ -1,10 +1,11 @@
-﻿"""
+"""
 Learned Rules Engine for Brahma AI
 Enables continuous self-improvement by capturing user corrections, preferred behaviors,
 and habits, then injecting them dynamically into the core LLM prompt without modifying source code.
 """
 
 from __future__ import annotations
+from core.user_paths import get_user_data_dir
 
 import json
 import logging
@@ -16,7 +17,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("LearnedRules")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-CONFIG_DIR = BASE_DIR / "config"
+CONFIG_DIR = get_user_data_dir() / "config"
 RULES_FILE = CONFIG_DIR / "learned_rules.json"
 
 

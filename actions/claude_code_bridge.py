@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.user_paths import get_user_data_dir
 
 import json
 from pathlib import Path
@@ -9,7 +10,7 @@ from actions.dev_agent import dev_agent
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-SETTINGS_PATH = BASE_DIR / "config" / "app_settings.json"
+SETTINGS_PATH = get_user_data_dir() / "config" / "app_settings.json"
 
 
 def _load_settings() -> dict[str, Any]:

@@ -514,7 +514,7 @@ def _render_title_page(story, pdf, title: str, subtitle: str | None, styles, aut
     if subtitle:
         story.append(pdf["Paragraph"](subtitle, styles["brahma_doc_subtitle"]))
     story.append(pdf["Spacer"](1, 0.4 * pdf["inch"]))
-    author_text = author or "Suryaansh Tiwari"
+    author_text = author or "User"
     story.append(
         pdf["Paragraph"](
             f"<b>Author:</b> {author_text} &nbsp;|&nbsp; <b>Division:</b> Brahma AI Autonomous Systems &nbsp;|&nbsp; <b>Date:</b> {datetime.now().strftime('%B %d, %Y')}",
@@ -803,7 +803,7 @@ def create_pdf(parameters: dict, player=None) -> str:
         topMargin=54,
         bottomMargin=54,
         title=title,
-        author=parameters.get("author") or "Suryaansh Tiwari",
+        author=parameters.get("author") or "User",
         subject=parameters.get("subject") or "Research Document",
     )
     doc.doc_title = title
@@ -818,7 +818,7 @@ def create_pdf(parameters: dict, player=None) -> str:
         date_value = (parameters.get("date") or datetime.now().strftime("%B %d, %Y")).strip()
         salutation = (parameters.get("salutation") or (f"Dear {recipient}," if recipient else "Dear Sir or Madam,")).strip()
         closing = (parameters.get("closing") or "Sincerely,").strip()
-        signature = (parameters.get("signature") or parameters.get("author") or "Suryaansh Tiwari").strip()
+        signature = (parameters.get("signature") or parameters.get("author") or "User").strip()
         body_text = parameters.get("body") or parameters.get("content") or ""
 
         story.append(pdf["Paragraph"](date_value, styles["brahma_body"]))

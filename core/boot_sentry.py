@@ -1,4 +1,5 @@
-﻿"""
+from core.user_paths import get_user_data_dir
+"""
 Boot Sentry for Brahma AI
 Runs at absolute startup before any heavy modules or UI to guarantee boot resilience.
 Detects if the previous session crashed right after an auto-patch, and safely rolls back.
@@ -14,7 +15,7 @@ from pathlib import Path
 logger = logging.getLogger("BootSentry")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-CONFIG_DIR = BASE_DIR / "config"
+CONFIG_DIR = get_user_data_dir() / "config"
 CRASH_LOG = BASE_DIR / "FATAL_CRASH.log"
 PATCH_HISTORY_FILE = CONFIG_DIR / "patch_history.json"
 

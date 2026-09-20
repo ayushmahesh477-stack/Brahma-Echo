@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 # actions/calendar_scheduler.py
 """
 Calendar and Schedule Management for Brahma AI.
@@ -15,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-EVENTS_FILE = BASE_DIR / "memory" / "calendar_events.json"
+EVENTS_FILE = get_user_data_dir() / "memory" / "calendar_events.json"
 
 PLUGIN = {
     "name": "calendar_scheduler",

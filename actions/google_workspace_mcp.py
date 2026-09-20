@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 import email
 import imaplib
 import json
@@ -24,7 +25,7 @@ def _get_base_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 BASE_DIR = _get_base_dir()
-CONFIG_DIR = BASE_DIR / "config"
+CONFIG_DIR = get_user_data_dir() / "config"
 EMAIL_KEY_FILE = CONFIG_DIR / ".email_key"
 EMAIL_CREDENTIALS_FILE = CONFIG_DIR / "email_credentials.json"
 GOOGLE_WORKSPACE_CRED_FILE = CONFIG_DIR / "google_workspace_credentials.json"

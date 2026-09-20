@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 # actions/daily_briefing.py
 """
 Unified Morning Intelligence Briefing for Brahma AI.
@@ -87,7 +88,7 @@ def _get_calendar_intel() -> Dict[str, Any]:
 
     # 2. Check local calendar storage as fallback/supplement
     try:
-        events_path = BASE_DIR / "memory" / "calendar_events.json"
+        events_path = get_user_data_dir() / "memory" / "calendar_events.json"
         if events_path.exists():
             with open(events_path, "r", encoding="utf-8") as f:
                 data = json.load(f)

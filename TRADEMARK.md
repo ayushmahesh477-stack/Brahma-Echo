@@ -1,7 +1,7 @@
 # Brahma Trademark Notice
 
 `Brahma`, `Brahma AI`, `Brahma AI - Lite`, the Brahma logo, and any related
-brand assets are trademarks or trade dress associated with Suryaansh Tiwari.
+brand assets are trademarks or trade dress associated with User.
 
 ## What this means
 

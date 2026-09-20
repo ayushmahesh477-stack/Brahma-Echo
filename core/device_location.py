@@ -1,3 +1,4 @@
+from core.user_paths import get_user_data_dir
 # core/device_location.py
 
 import json
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
-_CONFIG_DIR = _BASE_DIR / "config"
+_CONFIG_DIR = _get_user_data_dir() / "config"
 _CACHE_FILE = _CONFIG_DIR / "device_location_cache.json"
 _SETTINGS_FILE = _CONFIG_DIR / "app_settings.json"
 
